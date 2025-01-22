@@ -3206,8 +3206,8 @@ for determining if the configuration is used or not.
 If the value of the environment variable (set only on kanata startup)
 matches `env-var-value`, the configuration is used; otherwise it is ignored.
 An empty string for `env-var-value` — `""` — will use the configuration
-if the environment variable an empty string
-and also if the variable is unset/missing entirely.
+if the environment variable is an empty string
+and also if the environment variable is not defined.
 
 .Example:
 [source]
@@ -3956,6 +3956,28 @@ Use `kanata -l` or `kanata --list` to list the available keyboards.
 )
 ----
 
+[[macos-only-macos-dev-names-exclude]]
+=== macOS only: macos-dev-names-exclude
+
+This option defines a list of device names that should be excluded.
+By default, kanata will try to detect which input devices are keyboards and try
+to intercept them all. However, you may specify certain keyboard devices to be ignored
+using the `macos-dev-names-exclude` configuration.
+Device names that do not exist in the list will be included.
+This option is parsed identically to `linux-dev`.
+
+Use `kanata -l` or `kanata --list` to list the available keyboards.
+
+.Example:
+[source]
+----
+(defcfg
+  macos-dev-names-exclude (
+    "Device name 1"
+    "Device name 2"
+  )
+)
+----
 [[windows-only-windows-altgr]]
 === Windows only: windows-altgr
 
@@ -4400,8 +4422,8 @@ alongside templates to define sequences below.
 (deflayer base
         sldr nop0 nop1 nop2)
 (deftemplate seq (vk-name input-keys output-action)
-        sldr(defvirtualkeys $vk-name $output-action)
-        sldr(defseq $vk-name $input-keys)
+    (defvirtualkeys $vk-name $output-action)
+    (defseq $vk-name $input-keys)
 )
 ;; template-expand has a shortened form: t!
 (t! seq dotcom (nop0 nop1) (macro . c o m))
