@@ -28,12 +28,16 @@ may have content not applicable to the version you are using.
 See below for links to specific guide versions.
 
 ifdef::env-github[]
+* https://github.com/jtroo/kanata/blob/v1.9.0/docs/config.adoc[v1.9.0]
+* https://github.com/jtroo/kanata/blob/v1.8.1/docs/config.adoc[v1.8.1]
 * https://github.com/jtroo/kanata/blob/v1.8.0/docs/config.adoc[v1.8.0]
 * https://github.com/jtroo/kanata/blob/v1.7.0/docs/config.adoc[v1.7.0]
 * https://github.com/jtroo/kanata/blob/v1.6.1/docs/config.adoc[v1.6.1]
 * https://github.com/jtroo/kanata/blob/v1.6.0/docs/config.adoc[v1.6.0]
 endif::[]
 ifndef::env-github[]
+* link:/config-1.9.0.html[v1.9.0]
+* link:/config-1.8.1.html[v1.8.1]
 * link:/config-1.8.0.html[v1.8.0]
 * link:/config-1.7.0.html[v1.7.0]
 * link:/config-1.6.1.html[v1.6.1]
@@ -703,9 +707,9 @@ Variables are referred to by prefixing their name with `$`.
 [source]
 ----
 (defvar
-  tap-timeout   100
+  tap-repress-timeout   100
   hold-timeout  200
-  tt $tap-timeout
+  tt $tap-repress-timeout
   ht $hold-timeout
 )
 
@@ -818,6 +822,43 @@ kanata -c startup.cfg -c 2nd.cfg -c 3rd.cfg
 
 Given the above startup command,
 activating `(lrld-num 2)` would reload the `2nd.cfg` file.
+
+==== Automatic file watching
+
+You can enable automatic reloading of configuration files when they change on disk
+by using the `--watch` command line flag.
+
+[source]
+----
+kanata --cfg config.kbd --watch
+----
+
+When `--watch` is enabled:
+
+* Kanata monitors all configuration files specified with `--cfg` directly for changes
+* When a file is modified, kanata automatically triggers a live reload
+* Changes are debounced with a 500ms delay to avoid excessive reloading
+* Only the configuration files themselves are watched (not included files)
+
+**Limitations:**
+
+* File watching respects the same limitations as manual live reload: device-related configurations are not reloaded
+* Include files referenced by `(include ...)` statements are not automatically watched
+* Rapid consecutive changes to files may be batched together due to debouncing
+
+**Example usage:**
+
+[source]
+----
+;; Start kanata with automatic file watching
+kanata --cfg my-config.kbd --watch
+
+;; Watch multiple configuration files
+kanata --cfg base.kbd --cfg gaming.kbd --watch
+----
+
+This feature is particularly useful during configuration development,
+as it eliminates the need to manually trigger reloads via keyboard shortcuts.
 
 [[layer-switch]]
 === layer-switch
@@ -991,7 +1032,12 @@ are composed of multiple codepoints.
 NOTE: The <<clipboard-actions>> may output unicode characters more consistently.
 
 The `+unicode+` (or `+🔣+`) action accepts a single unicode character (but not
-a composed character, so 🤲, but not 🤲🏿).
+a composed character, so 🤲, but not 🤲🏿),
+or a single unicode number prefixed with `U+`.
+For example, both of these actions are the same:
+- `(unicode 🚆)`
+- `(unicode U+1F686)`
+
 If you want to output a glyph that is composed of multiple codepoints,
 you can use <<macro>> with multiple `unicode` actions.
 
@@ -1003,6 +1049,10 @@ application.
 
 NOTE: If using Linux, make sure to look at the
 <<linux-only-linux-unicode-u-code,unicode behaviour customization>> in defcfg.
+Furthermore, on Wayland the unicode mechanism may be broken entirely.
+On Wayland you can install then use the `wtype` program,
+using <<cmd, cmd>> to execute it.
+For example: `(cmd wtype á)`
 
 .Example:
 [source]
@@ -1520,7 +1570,7 @@ at a constant rate until a maximum is reached.
 | `$interval`
 | Number of milliseconds between move activations.
 
-| `$acceletaion-time`
+| `$acceleration-time`
 | Number of milliseconds until max distance per activation is reached.
 
 | `$min`
@@ -1887,12 +1937,12 @@ depending it a key is tapped or held.
 .Syntax:
 [source]
 ----
-(tap-hold $tap-timeout $hold-timeout $tap-action $hold-action)
+(tap-hold $tap-repress-timeout $hold-timeout $tap-action $hold-action)
 ----
 
 [cols="1,4"]
 |===
-| `$tap-timeout`
+| `$tap-repress-timeout`
 | Number of milliseconds for the window that a tap into re-press with hold
 results in the `$tap-action` being held.
 
@@ -1910,12 +1960,12 @@ results in `$tap-action` activating.
 
 .Variants:
 ----
-(tap-hold-press $tap-timeout $hold-timeout $tap-action $hold-action)
-(tap-hold-release $tap-timeout $hold-timeout $tap-action $hold-action)
-(tap-hold-press-timeout $tap-timeout $hold-timeout $tap-action $hold-action $timeout-action)
-(tap-hold-release-timeout $tap-timeout $hold-timeout $tap-action $hold-action $timeout-action)
-(tap-hold-release-keys $tap-timeout $hold-timeout $tap-action $hold-action $tap-keys)
-(tap-hold-except-keys $tap-timeout $hold-timeout $tap-action $hold-action $tap-keys)
+(tap-hold-press $tap-repress-timeout $hold-timeout $tap-action $hold-action)
+(tap-hold-release $tap-repress-timeout $hold-timeout $tap-action $hold-action)
+(tap-hold-press-timeout $tap-repress-timeout $hold-timeout $tap-action $hold-action $timeout-action)
+(tap-hold-release-timeout $tap-repress-timeout $hold-timeout $tap-action $hold-action $timeout-action [?reset-timeout-on-press])
+(tap-hold-release-keys $tap-repress-timeout $hold-timeout $tap-action $hold-action $tap-keys)
+(tap-hold-except-keys $tap-repress-timeout $hold-timeout $tap-action $hold-action $tap-keys)
 ----
 
 [cols="1,2"]
@@ -1933,6 +1983,8 @@ If the defined timeout elapses, `$timeout-action` will activate.
 | `tap-hold-release-timeout`
 | Activate `$hold-action` early if held and another input key is pressed and released.
 If the defined timeout elapses, `$timeout-action` will activate.
+Optionally include `reset-timeout-on-press` to reset timeout duration on a new press,
+giving more time for a subsequent release to activate hold instead of timeout.
 
 | `tap-hold-release-keys`
 | Activate `$hold-action` early if held and another input key is pressed and released.
@@ -1955,23 +2007,23 @@ key whereas a hold is a long press.
 
 The action takes 4 parameters in the listed order:
 
-. tap timeout (unit: ms)
+. tap repress timeout (unit: ms)
 . hold timeout (unit: ms)
 . tap action
 . hold action
 
-The tap timeout is the number of milliseconds within which a rapid
+The tap repress timeout is the number of milliseconds within which a rapid
 press+release+press of a key will result in the tap action being held instead
 of the hold action activating.
 
-.Tap timeout in more detail
+.Tap repress timeout in more detail
 [%collapsible,indent=4]
 ====
-The way a `tap-hold` action works with respect to the tap timeout
+The way a `tap-hold` action works with respect to the tap repress timeout
 is often unclear to newcomers.
 To make it concrete, the output event sequence of the `tap-hold` action
-`(tap-hold $tap-timeout 200 a lctl)`
-for varying values of `$tap-timeout`
+`(tap-hold $tap-repress-timeout 200 a lctl)`
+for varying values of `$tap-repress-timeout`
 with a fixed input event sequence will be described.
 
 The input event sequence is:
@@ -1984,7 +2036,7 @@ The input event sequence is:
 - 300 ms elapses
 - release
 
-With `(defvar $tap-timeout 0)`, the output event sequence is:
+With `(defvar $tap-repress-timeout 0)`, the output event sequence is:
 
 - 50 ms elapses
 - press `a`
@@ -1994,10 +2046,10 @@ With `(defvar $tap-timeout 0)`, the output event sequence is:
 - 100 ms elapses
 - release `lctl`
 
-The above output sequence is the same for all `$tap-timeout` values
+The above output sequence is the same for all `$tap-repress-timeout` values
 between and including `0` and `99`.
 
-For a value of `100` or greater for `$tap-timeout`,
+For a value of `100` or greater for `$tap-repress-timeout`,
 the output event sequence is instead:
 
 - 50 ms elapses
@@ -2043,6 +2095,14 @@ These variants take a 5th parameter, in addition to the same 4 as the other
 variants. The 5th parameter is another action, which will activate if the hold
 timeout expires as opposed to being triggered by other key actions, whereas the
 non `-timeout` variants will activate the hold action in both cases.
+
+The `release` variant also accepts an optional 6th argument,
+`reset-timeout-on-press` which if included changes the timeout behaviour.
+This flag will make the timeout duration reset if a new key is pressed.
+This may result in longer timeouts,
+but can help with more consistent hold activations;
+because it may be challenging to release a key in time
+to activate the hold action instead of the timeout action.
 
 - `tap-hold-release-keys` or `tap⬓↑keys`
 
@@ -2142,7 +2202,7 @@ or an output-chord-prefixed list of more macro-actions.
 
 | `macro-repeat-$cancel-variant`
 | Repeat the macro while held.
-Cancels the final repeat according the the behaviour of one of the variants:
+Cancels the final repeat according the behaviour of one of the variants:
 `release-cancel`, `cancel-on-press`, `release-cancel-and-cancel-on-press`.
 |===
 
@@ -2696,7 +2756,7 @@ One case is a triple of:
 
 The default use of the logic check behaves similarly to fork.
 
-For example, the the logic check `(a b c)` will activate the corresponding action
+For example, the logic check `(a b c)` will activate the corresponding action
 if any of a, b, or c are currently pressed.
 
 TIP: the keys `nop0-nop9` can be used as no-op outputs that
@@ -3162,6 +3222,30 @@ Something that may also work is `S-ins`
  300
  C-v
  (clipboard-restore 0)
+)
+----
+
+As another example you can use templates
+with clipboard actions to have a convenient clipboard-based
+text output while preserving the old clipboard content.
+This can fit the use case of "text expansion".
+
+.Example:
+[source]
+----
+(deftemplate text-paste (text)
+ (macro
+  (clipboard-save 0)
+  20
+  (clipboard-set $text)
+  300
+  C-v
+  (clipboard-restore 0)
+ ))
+
+(defalias
+ myalias1 (t! text-paste "Hello world")
+ myalias2 (t! text-paste "Goodbye my old friend")
 )
 ----
 
@@ -3789,6 +3873,67 @@ the swapped "i" and "o" keys.
 (deflayer block • • _ )
 ----
 
+[[mouse-movement-key]]
+=== Linux or Windows-interception only: mouse-movement-key
+
+Accepts a single key name.
+When configured, whenever a mouse cursor movement is received,
+the configured key name will be "tapped" by Kanata,
+activating the key's action.
+
+This enables reporting of every relative mouse movement, which
+corresponds to standard mice, trackballs, trackpads and
+trackpoints. Absolute movements, which can be generated by
+touchscreens, drawing tablets and some mouse replacement or
+accessibility software, are ignored. Scrolling events and mouse
+buttons are also ignored.
+
+The intended use of these events is to provide a way to automatically
+enable a mouse keys layer while mousing, which can be disabled by a
+timeout or typing on other keys, rather than explicit toggling. see
+cfg_examples/automousekeys-*.kbd for more.
+
+The `mvmt` key name is specially intended for this purpose.  It has no
+output key mapping and cannot be supplied as an action; however, any
+key may be used.
+
+Supports live reload on Linux, but with Windows-interception, this
+option must be present on startup to enable mouse movement event
+collection, so restart is required to enable it. Changing the key name
+is always supported, however.
+
+.Example:
+[source]
+----
+(defcfg
+  process-unmapped-keys yes
+  mouse-movement-key mvmt
+)
+
+(defsrc
+  k     l     ;
+  mvmt
+)
+
+(defvirtualkeys
+  mouse (layer-while-held mouse-layer)
+)
+
+(defalias
+  mhld (hold-for-duration 750 mouse)
+)
+
+(deflayer qwerty
+  k     l     ;
+  @mhld
+)
+
+(deflayer mouse-layer
+  mlft  mmid  mrgt
+  @mhld
+)
+----
+
 [[linux-only-linux-dev]]
 === Linux only: linux-dev
 
@@ -4022,6 +4167,20 @@ changing their behavior as well.
 ----
 (defcfg
   linux-use-trackpoint-property yes
+)
+----
+
+[[linux-only-linux-output-device-name]]
+=== Linux only: linux-output-device-name
+
+This option defines the name of the evdev output device.
+The default value is kanata.
+
+.Example:
+[source]
+----
+(defcfg
+   linux-output-device-name "kanata output"
 )
 ----
 
@@ -4350,6 +4509,121 @@ a non-applicable operating system.
 )
 ----
 
+== Command line arguments[[cli-args]]
+
+When executing Kanata, you can pass a variety of arguments to the program
+to change Kanata's behaviour.
+This section describes the purpose and usage of these arguments.
+
+[[args-help]]
+=== Show help text: `-h`, `--help`
+
+Only show help text that describes these arguments,
+then exit the program.
+
+[[args-config-file]]
+=== Configuration file(s): `-c`, `--cfg`
+
+Configuration file(s) to use with Kanata.
+When not specified, default file locations are checked.
+The default files checked depend on your operating system
+and are described by `--help`.
+
+This argument can be used more than once;
+see <<live-reload>> to understand the behaviour of this.
+The startup configuration will be the first file listed.
+
+[[args-tcp]]
+=== TCP server address: `-p`, `--port`
+
+Enable the TCP server capability and listen on either:
+- a specified port, on all IP addresses
+- a specifiec `IP:PORT`
+
+This enables use cases such as
+https://github.com/jtroo/kanata?tab=readme-ov-file#community-projects-related-to-kanata[application aware switching].
+
+The protocol is plaintext JSON, not formally documented anywhere at this time.
+The source of truth is the
+https://github.com/jtroo/kanata/blob/main/tcp_protocol/src/lib.rs[TCP protocol code].
+
+You may also be interested in the
+https://github.com/jtroo/kanata/blob/main/example_tcp_client/src/main.rs[example client].
+
+==== TCP Configuration Reload Commands
+
+The TCP server supports live configuration reloading through the following commands:
+
+- `{"Reload":{}}` - Reload the current configuration file (equivalent to `lrld` keyboard action)
+- `{"ReloadNext":{}}` - Reload the next configuration file (equivalent to `lrnx` keyboard action)  
+- `{"ReloadPrev":{}}` - Reload the previous configuration file (equivalent to `lrpv` keyboard action)
+- `{"ReloadNum":{"index":N}}` - Reload configuration file at index N (equivalent to `lrld-num N` keyboard action)
+- `{"ReloadFile":{"path":"/path/to/config.kbd"}}` - Reload a specific configuration file (equivalent to `lrld-file` keyboard action)
+
+These commands mirror the existing keyboard live reload actions and allow external tools to trigger configuration reloads via TCP.
+
+[[args-quiet]]
+=== Disable logs other than errors: `-q`, `--quiet`
+
+Silence info and warning logs so that only errors are logged.
+This might be desirable when running in the background as a system service.
+
+[[args-debug]]
+=== Enable debug logs: `-d`, `--debug`
+
+Add extra debug logging.
+This is helpful when diagnosing an issue
+or discovering key names.
+
+[[args-trace]]
+=== Enable trace logs: `-t`, `--trace`
+
+Add extra trace logging.
+Also includes debug logging.
+This is sometimes helpful when diagnosing an issue,
+but is very verbose.
+
+[[args-nodelay]]
+=== Remove startup delay: `-n`, `--nodelay`
+
+By default, Kanata adds a delay before reading keyboard inputs.
+This helps protect against stale states
+when started from a terminal.
+
+However, this may be undesirable
+when running as a background service.
+
+[[args-check]]
+=== Only check configuration: `--check`
+
+Check the configuration file validity and then exit.
+
+[[args-log-layer-changes]]
+=== Force log changes: `--log-layer-changes`
+
+Your final desired `defcfg` could be to have logging of layer changes as false.
+However, for testing purposes you may want to temporarily log the layers.
+This configuration forces logging to happen for this use case.
+
+[[args-linux-dev-symlink]]
+=== Linux only - Device symlink path: `-s`, `--symlink-path`
+
+If you want another program to consume the Kanata device output,
+you can use this flag to have a consistent device filesystem path.
+
+[[args-wait-device]]
+=== Linux only - Wait before device grab attempt: `-w`, `--wait-device-ms`
+
+Some devices take a while to become ready and can fail to be grabbed.
+This configuration adds a delay before trying to grab devices
+in case this is an issue impacting you.
+
+[[args-macos-list-devices]]
+=== macOS only - Only list keyboards: `-l`, `--list`
+
+List keyboard names that can be used
+within defcfg and then exit.
+
 == Advanced features[[advanced-features]]
 [[virtual-keys]]
 === Virtual keys
@@ -4364,6 +4638,10 @@ Activate a virtual key action when pressing the associated input key.
 Activate a virtual key action when releasing the associated input key.
 * `(on-idle <idle time> <action> <virtual key name>)`:
 Activate a virtual key action when kanata has been idle
+for at least `idle time` milliseconds.
+* `(on-physical-idle <idle time> <action> <virtual key name>)`:
+Activate a virtual key action when the physical keyboard has
+had all keys released
 for at least `idle time` milliseconds.
 * `(hold-for-duration <hold time> <virtual key name>`):
 Press a virtual key for `hold time` milliseconds.
@@ -4394,6 +4672,8 @@ For example, if a long-running macro is playing,
 or kanata is waiting for the timeout of actions such as `caps-word` or `tap-dance`,
 kanata is not yet idle, and the tick count for the `<idle time>` parameter
 will not yet be counting even if you no longer have any keyboard keys pressed.
+The variant `on-physical-idle` may be more desirable if you want the timer
+to only start based on having all keyboard keys be released.
 
 .Example:
 [source]
@@ -4694,6 +4974,37 @@ The second parameter is an override for `sequence-input-mode`:
 
 ;; Enter sequence mode and input . with a timeout of 250 and using hidden-delay-type
 (defalias dot-sequence (macro (sequence 250 hidden-delay-type) 10 .))
+----
+
+==== sequence-noerase
+
+When you have a keyboard locale that uses dead keys,
+you may be pressing two keys that only actually output one symbol.
+By default, when the `visible-backspaced` input mode does the backtracking backspaces,
+it backspaces according to input count.
+With dead keys, this may result in too many backspaces.
+
+The `sequence-noerase` action is a no-output action
+that tells the sequences action to have one fewer backspace
+when backtracking with visible-backspaced.
+
+.Example:
+[source]
+----
+(deflayermap (base)
+  0 sldr
+  u (t! maybe-noerase u)
+)
+(deftemplate maybe-noerase (char)
+  (multi
+    (switch
+      ((key-history ' 1)) (sequence-noerase 1) fallthrough
+      () $char break
+   ))
+)
+(defvirtualkeys seq-output-1 (macro a b c d e f g))
+(defseq seq-output-1 (' u))
+
 ----
 
 ==== More about sequences

@@ -1157,7 +1157,10 @@ fn parse_defsrc(
             for excluded_key in excluded_keys.iter() {
                 log::debug!("process unmapped keys exception: {:?}", excluded_key);
                 if mkeys.contains(&excluded_key.0) {
-                    bail_expr!(&excluded_key.1, "Keys cannot be included in defsrc and also excepted in process-unmapped-keys.");
+                    bail_expr!(
+                        &excluded_key.1,
+                        "Keys cannot be included in defsrc and also excepted in process-unmapped-keys."
+                    );
                 }
             }
 
@@ -1617,7 +1620,9 @@ fn parse_action_atom(ac_span: &Spanned<String>, s: &ParserState) -> Result<&'sta
         }
         "XX" | "✗" | "∅" | "•" => {
             if s.pctx.is_within_defvirtualkeys {
-                log::warn!("XX within defvirtualkeys is likely incorrect. You should use nop0-nop9 instead.");
+                log::warn!(
+                    "XX within defvirtualkeys is likely incorrect. You should use nop0-nop9 instead."
+                );
             }
             return Ok(s.a.sref(Action::NoOp));
         }
@@ -1631,7 +1636,7 @@ fn parse_action_atom(ac_span: &Spanned<String>, s: &ParserState) -> Result<&'sta
                     s.default_sequence_input_mode,
                 ),
                 &s.a,
-            )
+            );
         }
         "scnl" => return custom(CustomAction::SequenceCancel, &s.a),
         "mlft" | "mouseleft" => return custom(CustomAction::Mouse(Btn::Left), &s.a),
@@ -1650,7 +1655,7 @@ fn parse_action_atom(ac_span: &Spanned<String>, s: &ParserState) -> Result<&'sta
                     direction: MWheelDirection::Up,
                 },
                 &s.a,
-            )
+            );
         }
         "mwd" | "mousewheeldown" => {
             return custom(
@@ -1658,7 +1663,7 @@ fn parse_action_atom(ac_span: &Spanned<String>, s: &ParserState) -> Result<&'sta
                     direction: MWheelDirection::Down,
                 },
                 &s.a,
-            )
+            );
         }
         "mwl" | "mousewheelleft" => {
             return custom(
@@ -1666,7 +1671,7 @@ fn parse_action_atom(ac_span: &Spanned<String>, s: &ParserState) -> Result<&'sta
                     direction: MWheelDirection::Left,
                 },
                 &s.a,
-            )
+            );
         }
         "mwr" | "mousewheelright" => {
             return custom(
@@ -1674,12 +1679,12 @@ fn parse_action_atom(ac_span: &Spanned<String>, s: &ParserState) -> Result<&'sta
                     direction: MWheelDirection::Right,
                 },
                 &s.a,
-            )
+            );
         }
         "rpt" | "repeat" | "rpt-key" => return custom(CustomAction::Repeat, &s.a),
         "rpt-any" => return Ok(s.a.sref(Action::Repeat)),
         "dynamic-macro-record-stop" => {
-            return custom(CustomAction::DynamicMacroRecordStop(0), &s.a)
+            return custom(CustomAction::DynamicMacroRecordStop(0), &s.a);
         }
         "reverse-release-order" => match s.multi_action_nest_count.get() {
             0 => bail_span!(
@@ -1691,11 +1696,16 @@ fn parse_action_atom(ac_span: &Spanned<String>, s: &ParserState) -> Result<&'sta
         "use-defsrc" => {
             return Ok(s.a.sref(Action::Src));
         }
+        "mvmt" | "mousemovement" | "🖰mv" => {
+            bail_span!(ac_span, "{ac} can only be used as an input")
+        }
         _ => {}
     };
     if let Some(oscode) = str_to_oscode(ac) {
         if matches!(ac, "comp" | "cmp") {
-            log::warn!("comp/cmp/cmps is not actually a compose key even though its correpsonding code is KEY_COMPOSE. Its actual functionality is context menu which somewhat behaves like right-click.\nTo remove this warning, replace this usage with an equivalent key name such as: menu");
+            log::warn!(
+                "comp/cmp/cmps is not actually a compose key even though its correpsonding code is KEY_COMPOSE. Its actual functionality is context menu which somewhat behaves like right-click.\nTo remove this warning, replace this usage with an equivalent key name such as: menu"
+            );
         }
         return Ok(s.a.sref(k(oscode.into())));
     }
@@ -1828,14 +1838,17 @@ fn parse_action_list(ac: &[SExpr], s: &ParserState) -> Result<&'static KanataAct
         RELEASE_LAYER | RELEASE_LAYER_A => parse_release_layer(&ac[1..], s),
         ON_PRESS_FAKEKEY | ON_PRESS_FAKEKEY_A => parse_on_press_fake_key_op(&ac[1..], s),
         ON_RELEASE_FAKEKEY | ON_RELEASE_FAKEKEY_A => parse_on_release_fake_key_op(&ac[1..], s),
-        ON_PRESS_FAKEKEY_DELAY | ON_PRESS_FAKEKEY_DELAY_A => parse_fake_key_delay(&ac[1..], s),
-        ON_RELEASE_FAKEKEY_DELAY | ON_RELEASE_FAKEKEY_DELAY_A => {
+        ON_PRESS_DELAY | ON_PRESS_FAKEKEY_DELAY | ON_PRESS_FAKEKEY_DELAY_A => {
+            parse_fake_key_delay(&ac[1..], s)
+        }
+        ON_RELEASE_DELAY | ON_RELEASE_FAKEKEY_DELAY | ON_RELEASE_FAKEKEY_DELAY_A => {
             parse_on_release_fake_key_delay(&ac[1..], s)
         }
         ON_IDLE_FAKEKEY => parse_on_idle_fakekey(&ac[1..], s),
         ON_PRESS | ON_PRESS_A => parse_on_press(&ac[1..], s),
         ON_RELEASE | ON_RELEASE_A => parse_on_release(&ac[1..], s),
         ON_IDLE => parse_on_idle(&ac[1..], s),
+        ON_PHYSICAL_IDLE => parse_on_physical_idle(&ac[1..], s),
         HOLD_FOR_DURATION => parse_hold_for_duration(&ac[1..], s),
         MWHEEL_UP | MWHEEL_UP_A => parse_mwheel(&ac[1..], MWheelDirection::Up, s),
         MWHEEL_DOWN | MWHEEL_DOWN_A => parse_mwheel(&ac[1..], MWheelDirection::Down, s),
@@ -1882,6 +1895,7 @@ fn parse_action_list(ac: &[SExpr], s: &ParserState) -> Result<&'static KanataAct
         DYNAMIC_MACRO_RECORD_STOP_TRUNCATE => parse_macro_record_stop_truncate(&ac[1..], s),
         SWITCH => parse_switch(&ac[1..], s),
         SEQUENCE => parse_sequence_start(&ac[1..], s),
+        SEQUENCE_NOERASE => parse_sequence_noerase(&ac[1..], s),
         UNMOD => parse_unmod(UNMOD, &ac[1..], s),
         UNSHIFT | UNSHIFT_A => parse_unmod(UNSHIFT, &ac[1..], s),
         LIVE_RELOAD_NUM => parse_live_reload_num(&ac[1..], s),
@@ -1952,11 +1966,11 @@ fn parse_tap_hold(
         bail!(
             r"tap-hold expects 4 items after it, got {}.
 Params in order:
-<tap-timeout> <hold-timeout> <tap-action> <hold-action>",
+<tap-repress-timeout> <hold-timeout> <tap-action> <hold-action>",
             ac_params.len(),
         )
     }
-    let tap_timeout = parse_u16(&ac_params[0], s, "tap timeout")?;
+    let tap_repress_timeout = parse_u16(&ac_params[0], s, "tap repress timeout")?;
     let hold_timeout = parse_non_zero_u16(&ac_params[1], s, "hold timeout")?;
     let tap_action = parse_action(&ac_params[2], s)?;
     let hold_action = parse_action(&ac_params[3], s)?;
@@ -1965,11 +1979,12 @@ Params in order:
     }
     Ok(s.a.sref(Action::HoldTap(s.a.sref(HoldTapAction {
         config,
-        tap_hold_interval: tap_timeout,
+        tap_hold_interval: tap_repress_timeout,
         timeout: hold_timeout,
         tap: *tap_action,
         hold: *hold_action,
         timeout_action: *hold_action,
+        on_press_reset_timeout_to: None,
     }))))
 }
 
@@ -1978,15 +1993,31 @@ fn parse_tap_hold_timeout(
     s: &ParserState,
     config: HoldTapConfig<'static>,
 ) -> Result<&'static KanataAction> {
-    if ac_params.len() != 5 {
-        bail!(
-            r"tap-hold-(press|release)-timeout expects 5 items after it, got {}.
-Params in order:
-<tap-timeout> <hold-timeout> <tap-action> <hold-action> <timeout-action>",
-            ac_params.len(),
-        )
-    }
-    let tap_timeout = parse_u16(&ac_params[0], s, "tap timeout")?;
+    const PARAMS_FOR_RELEASE: &str = "Params in order:\n\
+       <tap-repress-timeout> <hold-timeout> <tap-action> <hold-action> <timeout-action> [?reset-timeout-on-press]";
+    match config {
+        HoldTapConfig::PermissiveHold => {
+            if ac_params.len() != 5 && ac_params.len() != 6 {
+                bail!(
+                    "tap-hold-release-timeout expects at least 5 items after it, got {}.\n\
+                    {PARAMS_FOR_RELEASE}",
+                    ac_params.len(),
+                )
+            }
+        }
+        HoldTapConfig::HoldOnOtherKeyPress => {
+            if ac_params.len() != 5 {
+                bail!(
+                    "tap-hold-press-timeout expects 5 items after it, got {}.\n\
+                    Params in order:\n\
+                    <tap-repress-timeout> <hold-timeout> <tap-action> <hold-action> <timeout-action>",
+                    ac_params.len(),
+                )
+            }
+        }
+        _ => unreachable!("other configs not expected"),
+    };
+    let tap_repress_timeout = parse_u16(&ac_params[0], s, "tap repress timeout")?;
     let hold_timeout = parse_non_zero_u16(&ac_params[1], s, "hold timeout")?;
     let tap_action = parse_action(&ac_params[2], s)?;
     let hold_action = parse_action(&ac_params[3], s)?;
@@ -1994,13 +2025,26 @@ Params in order:
     if matches!(tap_action, Action::HoldTap { .. }) {
         bail!("tap-hold does not work in the tap-action of tap-hold")
     }
+    let on_press_reset_timeout_to = match config {
+        HoldTapConfig::PermissiveHold => match ac_params.len() {
+            6 => match ac_params[5].atom(s.vars()) {
+                Some("reset-timeout-on-press") => std::num::NonZeroU16::new(hold_timeout),
+                _ => bail_expr!(&ac_params[5], "Unexpected parameter.\n{PARAMS_FOR_RELEASE}"),
+            },
+            5 => None,
+            _ => unreachable!("other lengths not expected"),
+        },
+        HoldTapConfig::HoldOnOtherKeyPress => None,
+        _ => unreachable!("other configs not expected"),
+    };
     Ok(s.a.sref(Action::HoldTap(s.a.sref(HoldTapAction {
         config,
-        tap_hold_interval: tap_timeout,
+        tap_hold_interval: tap_repress_timeout,
         timeout: hold_timeout,
         tap: *tap_action,
         hold: *hold_action,
         timeout_action: *timeout_action,
+        on_press_reset_timeout_to,
     }))))
 }
 
@@ -2014,12 +2058,12 @@ fn parse_tap_hold_keys(
         bail!(
             r"tap-hold-{}-keys expects 5 items after it, got {}.
 Params in order:
-<tap-timeout> <hold-timeout> <tap-action> <hold-action> <tap-trigger-keys>",
+<tap-repress-timeout> <hold-timeout> <tap-action> <hold-action> <tap-trigger-keys>",
             custom_name,
             ac_params.len(),
         )
     }
-    let tap_timeout = parse_u16(&ac_params[0], s, "tap timeout")?;
+    let tap_repress_timeout = parse_u16(&ac_params[0], s, "tap repress timeout")?;
     let hold_timeout = parse_non_zero_u16(&ac_params[1], s, "hold timeout")?;
     let tap_action = parse_action(&ac_params[2], s)?;
     let hold_action = parse_action(&ac_params[3], s)?;
@@ -2029,11 +2073,12 @@ Params in order:
     }
     Ok(s.a.sref(Action::HoldTap(s.a.sref(HoldTapAction {
         config: HoldTapConfig::Custom(custom_func(&tap_trigger_keys, &s.a)),
-        tap_hold_interval: tap_timeout,
+        tap_hold_interval: tap_repress_timeout,
         timeout: hold_timeout,
         tap: *tap_action,
         hold: *hold_action,
         timeout_action: *hold_action,
+        on_press_reset_timeout_to: None,
     }))))
 }
 
@@ -2043,11 +2088,7 @@ fn parse_u8_with_range(expr: &SExpr, s: &ParserState, label: &str, min: u8, max:
         .and_then(|u| u.ok())
         .and_then(|u| {
             assert!(min <= max);
-            if u >= min && u <= max {
-                Some(u)
-            } else {
-                None
-            }
+            if u >= min && u <= max { Some(u) } else { None }
         })
         .ok_or_else(|| anyhow_expr!(expr, "{label} must be {min}-{max}"))
 }
@@ -2059,6 +2100,11 @@ fn parse_u16(expr: &SExpr, s: &ParserState, label: &str) -> Result<u16> {
         .ok_or_else(|| anyhow_expr!(expr, "{label} must be 0-65535"))
 }
 
+// Note on allows:
+// - macOS CI is behind on Rust version.
+// - Clippy bug in new lint of Rust v1.86.
+#[allow(unknown_lints)]
+#[allow(clippy::manual_ok_err)]
 fn parse_non_zero_u16(expr: &SExpr, s: &ParserState, label: &str) -> Result<u16> {
     expr.atom(s.vars())
         .map(str::parse::<u16>)
@@ -2461,7 +2507,7 @@ pub fn parse_mod_prefix(mods: &str) -> Result<(Vec<KeyCode>, &str)> {
 }
 
 fn parse_unicode(ac_params: &[SExpr], s: &ParserState) -> Result<&'static KanataAction> {
-    const ERR_STR: &str = "unicode expects exactly one (not combos looking like one) unicode character as an argument";
+    const ERR_STR: &str = "unicode expects exactly one (not combos looking like one) unicode character as an argument\nor a unicode hex number, prefixed by U+. Example: U+1F686.";
     if ac_params.len() != 1 {
         bail!(ERR_STR)
     }
@@ -2469,12 +2515,26 @@ fn parse_unicode(ac_params: &[SExpr], s: &ParserState) -> Result<&'static Kanata
         .atom(s.vars())
         .map(|a| {
             let a = a.trim_atom_quotes();
-            if a.chars().count() != 1 {
-                bail_expr!(&ac_params[0], "{ERR_STR}")
-            }
-            Ok(s.a.sref(Action::Custom(s.a.sref(s.a.sref_slice(
-                CustomAction::Unicode(a.chars().next().expect("1 char")),
-            )))))
+            let unicode_char = match a.chars().count() {
+                0 => bail_expr!(&ac_params[0], "{ERR_STR}"),
+                1 => a.chars().next().expect("1 char"),
+                _ => {
+                    let normalized = a.to_uppercase();
+                    let Some(hexnum) = normalized.strip_prefix("U+") else {
+                        bail_expr!(&ac_params[0], "{ERR_STR}.\nMust begin with U+")
+                    };
+                    let Ok(u_val) = u32::from_str_radix(hexnum, 16) else {
+                        bail_expr!(&ac_params[0], "{ERR_STR}.\nInvalid number after U+")
+                    };
+                    match char::from_u32(u_val) {
+                        Some(v) => v,
+                        None => bail_expr!(&ac_params[0], "{ERR_STR}.\nInvalid char."),
+                    }
+                }
+            };
+            Ok(s.a.sref(Action::Custom(
+                s.a.sref(s.a.sref_slice(CustomAction::Unicode(unicode_char))),
+            )))
         })
         .ok_or_else(|| anyhow_expr!(&ac_params[0], "{ERR_STR}"))?
 }
@@ -2497,7 +2557,9 @@ fn parse_cmd_log(ac_params: &[SExpr], s: &ParserState) -> Result<&'static Kanata
     const ERR_STR: &str =
         "cmd-log expects at least 3 strings, <log-level> <error-log-level> <cmd...>";
     if !s.is_cmd_enabled {
-        bail!("cmd is not enabled for this kanata executable (did you use 'cmd_allowed' variants?), but is set in the configuration");
+        bail!(
+            "cmd is not enabled for this kanata executable (did you use 'cmd_allowed' variants?), but is set in the configuration"
+        );
     }
     if ac_params.len() < 3 {
         bail!(ERR_STR);
@@ -2599,14 +2661,16 @@ fn test_collect_strings() {
     collect_strings(&params[0].t, &mut strings, &ParserState::default());
     assert_eq!(
         &strings,
-        &["gah", "squish", "squash", "splish", "splosh", "bah mah", "dah"]
+        &[
+            "gah", "squish", "squash", "splish", "splosh", "bah mah", "dah"
+        ]
     );
 }
 
 fn parse_push_message(ac_params: &[SExpr], s: &ParserState) -> Result<&'static KanataAction> {
     if ac_params.is_empty() {
         bail!(
-             "{PUSH_MESSAGE} expects at least one item, an item can be a list or an atom, found 0, none"
+            "{PUSH_MESSAGE} expects at least one item, an item can be a list or an atom, found 0, none"
         );
     }
     let message = to_simple_expr(ac_params, s);
@@ -3149,10 +3213,7 @@ fn parse_virtual_keys(exprs: &[&Vec<SExpr>], s: &mut ParserState) -> Result<()> 
 fn parse_distance(expr: &SExpr, s: &ParserState, label: &str) -> Result<u16> {
     expr.atom(s.vars())
         .map(str::parse::<u16>)
-        .and_then(|d| match d {
-            Ok(dist @ 1..=30000) => Some(dist),
-            _ => None,
-        })
+        .and_then(|d| d.ok())
         .ok_or_else(|| anyhow_expr!(expr, "{label} must be 1-30000"))
 }
 
@@ -3202,7 +3263,10 @@ fn parse_move_mouse_accel(
     s: &ParserState,
 ) -> Result<&'static KanataAction> {
     if ac_params.len() != 4 {
-        bail!("movemouse-accel expects four parameters, found {}\n<interval (ms)> <acceleration time (ms)> <min_distance> <max_distance>", ac_params.len());
+        bail!(
+            "movemouse-accel expects four parameters, found {}\n<interval (ms)> <acceleration time (ms)> <min_distance> <max_distance>",
+            ac_params.len()
+        );
     }
     let interval = parse_non_zero_u16(&ac_params[0], s, "interval")?;
     let accel_time = parse_non_zero_u16(&ac_params[1], s, "acceleration time")?;
@@ -3387,7 +3451,7 @@ fn parse_layers(
     let mut defsrc_layer = s.defsrc_layer;
     for (layer_level, layer) in s.layer_exprs.iter().enumerate() {
         match layer {
-            // The skip is done to skip the the `deflayer` and layer name tokens.
+            // The skip is done to skip the `deflayer` and layer name tokens.
             LayerExprs::DefsrcMapping(layer) => {
                 // Parse actions in the layer and place them appropriately according
                 // to defsrc mapping order.
@@ -3606,10 +3670,13 @@ fn parse_sequences(exprs: &[&Vec<SExpr>], s: &ParserState) -> Result<KeySeqsToFK
                     bail_expr!(
                         key_seq_expr,
                         "Sequence has a conflict: its sequence contains an earlier defined sequence"
-                        );
+                    );
                 }
                 if sequences.descendant_exists(&p) {
-                    bail_expr!(key_seq_expr, "Sequence has a conflict: its sequence is contained within an earlier defined seqence");
+                    bail_expr!(
+                        key_seq_expr,
+                        "Sequence has a conflict: its sequence is contained within an earlier defined seqence"
+                    );
                 }
                 sequences.insert(
                     p,
@@ -3730,10 +3797,7 @@ fn parse_arbitrary_code(ac_params: &[SExpr], s: &ParserState) -> Result<&'static
     let code = ac_params[0]
         .atom(s.vars())
         .map(str::parse::<u16>)
-        .and_then(|c| match c {
-            Ok(code @ 0..=767) => Some(code),
-            _ => None,
-        })
+        .and_then(|c| c.ok())
         .ok_or_else(|| anyhow!("{ERR_MSG}: got {:?}", ac_params[0]))?;
     Ok(s.a.sref(Action::Custom(
         s.a.sref(s.a.sref_slice(CustomAction::SendArbitraryCode(code))),
@@ -3954,6 +4018,17 @@ fn parse_sequence_start(ac_params: &[SExpr], s: &ParserState) -> Result<&'static
     Ok(s.a.sref(Action::Custom(s.a.sref(
         s.a.sref_slice(CustomAction::SequenceLeader(timeout, input_mode)),
     ))))
+}
+
+fn parse_sequence_noerase(ac_params: &[SExpr], s: &ParserState) -> Result<&'static KanataAction> {
+    const ERR_MSG: &str = "sequence-noerase expects one: <noerase-count>";
+    if ac_params.len() != 1 {
+        bail!("{ERR_MSG}\nfound {} items", ac_params.len());
+    }
+    let count = parse_non_zero_u16(&ac_params[0], s, "noerase-count")?;
+    Ok(s.a.sref(Action::Custom(
+        s.a.sref(s.a.sref_slice(CustomAction::SequenceNoerase(count))),
+    )))
 }
 
 fn parse_unmod(

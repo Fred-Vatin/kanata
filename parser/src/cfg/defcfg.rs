@@ -1,6 +1,6 @@
-use super::sexpr::SExpr;
 use super::HashSet;
-use super::{error::*, TrimAtomQuotes};
+use super::sexpr::SExpr;
+use super::{TrimAtomQuotes, error::*};
 use crate::cfg::check_first_expr;
 use crate::custom_action::*;
 use crate::keys::*;
@@ -17,7 +17,7 @@ pub enum DeviceDetectMode {
 #[cfg(any(target_os = "linux", target_os = "unknown"))]
 impl std::fmt::Display for DeviceDetectMode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}", self)
+        write!(f, "{self:?}")
     }
 }
 
@@ -32,6 +32,7 @@ pub struct CfgLinuxOptions {
     pub linux_unicode_termination: UnicodeTermination,
     pub linux_x11_repeat_delay_rate: Option<KeyRepeatSettings>,
     pub linux_use_trackpoint_property: bool,
+    pub linux_output_name: String,
     pub linux_output_bus_type: LinuxCfgOutputBusType,
     pub linux_device_detect_mode: Option<DeviceDetectMode>,
 }
@@ -49,6 +50,7 @@ impl Default for CfgLinuxOptions {
             linux_unicode_termination: UnicodeTermination::Enter,
             linux_x11_repeat_delay_rate: None,
             linux_use_trackpoint_property: false,
+            linux_output_name: "kanata".to_owned(),
             linux_output_bus_type: LinuxCfgOutputBusType::BusI8042,
             linux_device_detect_mode: None,
         }
@@ -152,6 +154,12 @@ pub struct CfgOptions {
     pub rapid_event_delay: u16,
     pub trans_resolution_behavior_v2: bool,
     pub chords_v2_min_idle: u16,
+    #[cfg(any(
+        all(target_os = "windows", feature = "interception_driver"),
+        target_os = "linux",
+        target_os = "unknown"
+    ))]
+    pub mouse_movement_key: Option<OsCode>,
     #[cfg(any(target_os = "linux", target_os = "unknown"))]
     pub linux_opts: CfgLinuxOptions,
     #[cfg(any(target_os = "macos", target_os = "unknown"))]
@@ -191,6 +199,12 @@ impl Default for CfgOptions {
             rapid_event_delay: 5,
             trans_resolution_behavior_v2: true,
             chords_v2_min_idle: 5,
+            #[cfg(any(
+                all(target_os = "windows", feature = "interception_driver"),
+                target_os = "linux",
+                target_os = "unknown"
+            ))]
+            mouse_movement_key: None,
             #[cfg(any(target_os = "linux", target_os = "unknown"))]
             linux_opts: Default::default(),
             #[cfg(any(target_os = "windows", target_os = "unknown"))]
@@ -220,7 +234,9 @@ pub fn parse_defcfg(expr: &[SExpr]) -> Result<CfgOptions> {
             Some(k) => k,
             None => {
                 if !is_process_unmapped_keys_defined {
-                    log::warn!("The item process-unmapped-keys is not defined in defcfg. Consider whether process-unmapped-keys should be yes vs. no.");
+                    log::warn!(
+                        "The item process-unmapped-keys is not defined in defcfg. Consider whether process-unmapped-keys should be yes vs. no."
+                    );
                 }
                 return Ok(cfg);
             }
@@ -348,11 +364,27 @@ pub fn parse_defcfg(expr: &[SExpr]) -> Result<CfgOptions> {
                                 parse_defcfg_val_bool(val, label)?
                         }
                     }
+                    "linux-output-device-name" => {
+                        #[cfg(any(target_os = "linux", target_os = "unknown"))]
+                        {
+                            let device_name = sexpr_to_str_or_err(val, label)?;
+                            if device_name.is_empty() {
+                                log::warn!(
+                                    "linux-output-device-name is empty, using kanata as default value"
+                                );
+                            } else {
+                                cfg.linux_opts.linux_output_name = device_name.to_owned();
+                            }
+                        }
+                    }
                     "linux-output-device-bus-type" => {
                         let bus_type = sexpr_to_str_or_err(val, label)?;
                         match bus_type {
-                            "USB" | "I8042" => {},
-                            _ => bail_expr!(val, "Invalid value for linux-output-device-bus-type.\nExpected one of: USB or I8042"),
+                            "USB" | "I8042" => {}
+                            _ => bail_expr!(
+                                val,
+                                "Invalid value for linux-output-device-bus-type.\nExpected one of: USB or I8042"
+                            ),
                         };
                         #[cfg(any(target_os = "linux", target_os = "unknown"))]
                         {
@@ -367,8 +399,11 @@ pub fn parse_defcfg(expr: &[SExpr]) -> Result<CfgOptions> {
                     "linux-device-detect-mode" => {
                         let detect_mode = sexpr_to_str_or_err(val, label)?;
                         match detect_mode {
-                            "any" | "keyboard-only" | "keyboard-mice" => {},
-                            _ => bail_expr!(val, "Invalid value for linux-device-detect-mode.\nExpected one of: any | keyboard-only | keyboard-mice"),
+                            "any" | "keyboard-only" | "keyboard-mice" => {}
+                            _ => bail_expr!(
+                                val,
+                                "Invalid value for linux-device-detect-mode.\nExpected one of: any | keyboard-only | keyboard-mice"
+                            ),
                         };
                         #[cfg(any(target_os = "linux", target_os = "unknown"))]
                         {
@@ -417,7 +452,10 @@ pub fn parse_defcfg(expr: &[SExpr]) -> Result<CfgOptions> {
                                 .windows_interception_mouse_hwids_exclude
                                 .is_some()
                             {
-                                bail_expr!(val, "{label} and windows-interception-mouse-hwid-exclude cannot both be included");
+                                bail_expr!(
+                                    val,
+                                    "{label} and windows-interception-mouse-hwid-exclude cannot both be included"
+                                );
                             }
                             let v = sexpr_to_str_or_err(val, label)?;
                             let hwid = v;
@@ -470,7 +508,10 @@ pub fn parse_defcfg(expr: &[SExpr]) -> Result<CfgOptions> {
                                 .windows_interception_mouse_hwids_exclude
                                 .is_some()
                             {
-                                bail_expr!(val, "{label} and windows-interception-mouse-hwid-exclude cannot both be included");
+                                bail_expr!(
+                                    val,
+                                    "{label} and windows-interception-mouse-hwid-exclude cannot both be included"
+                                );
                             }
                             let parsed_hwids = sexpr_to_hwids_vec(
                                 val,
@@ -508,7 +549,10 @@ pub fn parse_defcfg(expr: &[SExpr]) -> Result<CfgOptions> {
                                 .windows_interception_mouse_hwids
                                 .is_some()
                             {
-                                bail_expr!(val, "{label} and windows-interception-mouse-hwid(s) cannot both be used");
+                                bail_expr!(
+                                    val,
+                                    "{label} and windows-interception-mouse-hwid(s) cannot both be used"
+                                );
                             }
                             let parsed_hwids = sexpr_to_hwids_vec(
                                 val,
@@ -530,7 +574,10 @@ pub fn parse_defcfg(expr: &[SExpr]) -> Result<CfgOptions> {
                                 .windows_interception_keyboard_hwids_exclude
                                 .is_some()
                             {
-                                bail_expr!(val, "{label} and windows-interception-keyboard-hwid-exclude cannot both be used");
+                                bail_expr!(
+                                    val,
+                                    "{label} and windows-interception-keyboard-hwid-exclude cannot both be used"
+                                );
                             }
                             let parsed_hwids = sexpr_to_hwids_vec(
                                 val,
@@ -552,7 +599,10 @@ pub fn parse_defcfg(expr: &[SExpr]) -> Result<CfgOptions> {
                                 .windows_interception_keyboard_hwids
                                 .is_some()
                             {
-                                bail_expr!(val, "{label} and windows-interception-keyboard-hwid cannot both be used");
+                                bail_expr!(
+                                    val,
+                                    "{label} and windows-interception-keyboard-hwid cannot both be used"
+                                );
                             }
                             let parsed_hwids = sexpr_to_hwids_vec(
                                 val,
@@ -746,7 +796,9 @@ pub fn parse_defcfg(expr: &[SExpr]) -> Result<CfgOptions> {
                     "delegate-to-first-layer" => {
                         cfg.delegate_to_first_layer = parse_defcfg_val_bool(val, label)?;
                         if cfg.delegate_to_first_layer {
-                            log::info!("delegating transparent keys on other layers to first defined layer");
+                            log::info!(
+                                "delegating transparent keys on other layers to first defined layer"
+                            );
                         }
                     }
                     "linux-continue-if-no-devs-found" => {
@@ -785,14 +837,34 @@ pub fn parse_defcfg(expr: &[SExpr]) -> Result<CfgOptions> {
                     }
                     "chords-v2-min-idle" | "chords-v2-min-idle-experimental" => {
                         if label == "chords-v2-min-idle-experimental" {
-                            log::warn!("You should replace chords-v2-min-idle-experimental with chords-v2-min-idle\n\
-                                        Using -experimental will be invalid in the future.")
+                            log::warn!(
+                                "You should replace chords-v2-min-idle-experimental with chords-v2-min-idle\n\
+                                        Using -experimental will be invalid in the future."
+                            )
                         }
                         let min_idle = parse_cfg_val_u16(val, label, true)?;
                         if min_idle < 5 {
                             bail_expr!(val, "{label} must be 5-65535");
                         }
                         cfg.chords_v2_min_idle = min_idle;
+                    }
+                    "mouse-movement-key" => {
+                        #[cfg(any(
+                            all(target_os = "windows", feature = "interception_driver"),
+                            target_os = "linux",
+                            target_os = "unknown"
+                        ))]
+                        {
+                            if let Some(keystr) = parse_defcfg_val_string(val, label)? {
+                                if let Some(key) = str_to_oscode(&keystr) {
+                                    cfg.mouse_movement_key = Some(key);
+                                } else {
+                                    bail_expr!(val, "{label} not a recognised key code");
+                                }
+                            } else {
+                                bail_expr!(val, "{label} not a string for a key code");
+                            }
+                        }
                     }
                     _ => bail_expr!(key, "Unknown defcfg option {}", label),
                 };

@@ -104,14 +104,10 @@ Build and run yourself in Windows.
 
 Build and run yourself in macOS:
 
-For macOS version 11 and newer: Install the [Karabiner VirtualHiDDevice Driver](https://github.com/pqrs-org/Karabiner-DriverKit-VirtualHIDDevice/blob/main/dist/Karabiner-DriverKit-VirtualHIDDevice-5.0.0.pkg).
+First install the Karabiner driver by following the macOS documentation
+in the [releases page](https://github.com/jtroo/kanata/releases/).
 
-To activate it:
-
-`/Applications/.Karabiner-VirtualHIDDevice-Manager.app/Contents/MacOS/Karabiner-VirtualHIDDevice-Manager activate`
-
-For macOS version 10 and older:
-Install the [Karabiner kernel extension](https://github.com/pqrs-org/Karabiner-VirtualHIDDevice).
+Then you can compile and run with the instructions below:
 
     git clone https://github.com/jtroo/kanata && cd kanata
     cargo build   # --release optional, not really perf sensitive
@@ -223,12 +219,14 @@ Some directories are exceptions:
 - [vscode-kanata](https://github.com/rszyma/vscode-kanata): Language support for kanata configuration files in VS Code
 - [komokana](https://github.com/LGUG2Z/komokana): Automatic application-aware layer switching for [`komorebi`](https://github.com/LGUG2Z/komorebi) (Windows)
 - [kanata-tray](https://github.com/rszyma/kanata-tray): Control kanata from a tray icon
+- [OverKeys](https://github.com/conventoangelo/overkeys): Visual layer display for kanata - see your active layers and keymaps in real-time (Windows)
 - Application-aware layer switching:
    - [qanata (Linux)](https://github.com/veyxov/qanata)
    - [kanawin (Windows)](https://github.com/Aqaao/kanawin)
    - [window_tools (Windows)](https://github.com/reidprichard/window_tools)
    - [nata (Linux)](https://github.com/mdSlash/nata)
    - [kanata-vk-agent (macOS)](https://github.com/devsunb/kanata-vk-agent)
+   - [hyprkan (Linux)](https://github.com/mdSlash/hyprkan)
 
 ## What does the name mean?
 

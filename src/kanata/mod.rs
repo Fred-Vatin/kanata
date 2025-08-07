@@ -2,7 +2,7 @@
 
 #[cfg(all(target_os = "windows", feature = "gui"))]
 use crate::gui::win::*;
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use kanata_parser::sequences::*;
 use log::{error, info};
 use parking_lot::Mutex;
@@ -19,12 +19,12 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time;
 
-use crate::oskbd::{KeyEvent, *};
-#[cfg(feature = "tcp_server")]
-use crate::tcp_server::simple_sexpr_to_json_array;
 #[cfg(feature = "tcp_server")]
 use crate::SocketAddrWrapper;
 use crate::ValidatedArgs;
+use crate::oskbd::{KeyEvent, *};
+#[cfg(feature = "tcp_server")]
+use crate::tcp_server::simple_sexpr_to_json_array;
 use kanata_parser::cfg;
 use kanata_parser::cfg::list_actions::*;
 use kanata_parser::cfg::*;
@@ -39,6 +39,9 @@ mod dynamic_macro;
 use dynamic_macro::*;
 
 mod key_repeat;
+
+mod millisecond_counting;
+pub use millisecond_counting::*;
 
 mod sequences;
 use sequences::*;
@@ -61,22 +64,24 @@ mod linux;
 
 #[cfg(target_os = "macos")]
 mod macos;
-#[cfg(target_os = "macos")]
-use macos::*;
 
 mod output_logic;
 use output_logic::*;
 
 #[cfg(target_os = "unknown")]
 mod unknown;
-#[cfg(target_os = "unknown")]
-use unknown::*;
 
 mod caps_word;
 pub use caps_word::*;
 
 type HashSet<T> = rustc_hash::FxHashSet<T>;
 type HashMap<K, V> = rustc_hash::FxHashMap<K, V>;
+
+/// State of pressed keys on the physical keyboard.
+///
+/// Notably this is not what keys kanata is outputting as pressed.
+pub(crate) static PRESSED_KEYS: Lazy<Mutex<HashSet<OsCode>>> =
+    Lazy::new(|| Mutex::new(HashSet::default()));
 
 pub struct Kanata {
     /// Handle to some OS keyboard output mechanism.
@@ -86,6 +91,12 @@ pub struct Kanata {
     /// Index into `cfg_paths`, used to know which file to live reload. Changes when cycling
     /// through the configuration files.
     pub cur_cfg_idx: usize,
+    /// Files included via (include "path") in the configuration.
+    pub included_files: Vec<PathBuf>,
+    /// File watcher for configuration changes.
+    #[cfg(feature = "watch")]
+    pub file_watcher:
+        Option<notify_debouncer_mini::Debouncer<notify_debouncer_mini::notify::RecommendedWatcher>>,
     /// The potential key outputs of every key input. Used for managing key repeat.
     pub key_outputs: cfg::KeyOutputs,
     /// Handle to the keyberon library layout.
@@ -133,7 +144,7 @@ pub struct Kanata {
     /// Tracks the progress of an active dynamic macro. Is Some(...) when a dynamic macro is being
     /// replayed and None otherwise.
     pub dynamic_macro_replay_state: Option<DynamicMacroReplayState>,
-    /// Tracks the the inputs for a dynamic macro recording. Is Some(...) when a dynamic macro is
+    /// Tracks the inputs for a dynamic macro recording. Is Some(...) when a dynamic macro is
     /// being recorded and None otherwise.
     pub dynamic_macro_record_state: Option<DynamicMacroRecordState>,
     /// Global overrides defined in the user configuration.
@@ -143,12 +154,15 @@ pub struct Kanata {
     pub override_states: OverrideStates,
     /// Time of the last tick to know how many tick iterations to run, to achieve a 1ms tick
     /// interval more closely.
-    last_tick: instant::Instant,
+    last_tick: web_time::Instant,
     /// Tracks the non-whole-millisecond gaps between ticks to know when to do another tick
     /// iteration without sleeping, to achive a 1ms tick interval more closely.
     time_remainder: u128,
     /// Is true if a live reload was requested by the user and false otherwise.
     live_reload_requested: bool,
+    /// Flag to indicate that the file watcher needs to be restarted due to include file changes.
+    #[cfg(feature = "watch")]
+    pub file_watcher_restart_requested: bool,
     #[cfg(target_os = "linux")]
     /// Linux input paths in the user configuration.
     pub kbd_in_paths: Vec<String>,
@@ -194,14 +208,20 @@ pub struct Kanata {
     /// Determines what types of devices to grab based on autodetection mode.
     #[cfg(target_os = "linux")]
     pub device_detect_mode: DeviceDetectMode,
-    /// Fake key actions that are waiting for a certain duration of keyboard idling.
+    /// Fake key actions that are waiting for a certain duration of kanata idling.
     pub waiting_for_idle: HashSet<FakeKeyOnIdle>,
+    /// Fake key actions that are waiting for a certain duration of physical keyboard idling,
+    /// as opposed to `waiting_for_idle`, for which non-idling is extended by ongoing kanata state
+    /// processing, such as `caps_word` or `one_shot` terminations.
+    pub waiting_for_physical_idle: HashSet<FakeKeyOnIdle>,
     /// Fake key actions that are being held and are pending release.
     /// The key is the coordinate and the value is the number of ticks until release should be
     /// done.
     pub vkeys_pending_release: HashMap<Coord, u16>,
     /// Number of ticks since kanata was idle.
     pub ticks_since_idle: u16,
+    /// Number of ticks since physical keyboards were all idle.
+    pub ticks_since_physical_idle: u16,
     /// If a mousemove action is active and another mousemove action is activated,
     /// reuse the acceleration state.
     movemouse_inherit_accel_state: bool,
@@ -242,6 +262,13 @@ pub struct Kanata {
     pub macro_on_press_cancel_duration: u32,
     /// Stores user's saved clipboard contents.
     pub saved_clipboard_content: SavedClipboardData,
+    // if set, key taps of this code are sent whenever mouse movement events are passed through
+    #[cfg(any(
+        all(target_os = "windows", feature = "interception_driver"),
+        target_os = "linux",
+        target_os = "unknown"
+    ))]
+    mouse_movement_key: Arc<Mutex<Option<OsCode>>>,
 }
 
 #[derive(PartialEq, Clone, Copy)]
@@ -257,6 +284,15 @@ impl From<MoveDirection> for Axis {
             MoveDirection::Left | MoveDirection::Right => Axis::Horizontal,
         }
     }
+}
+
+/// Represents reload actions that need to be processed after releasing borrows
+enum ReloadAction {
+    Reload,
+    ReloadNext,
+    ReloadPrev,
+    ReloadNum(usize),
+    ReloadFile(String),
 }
 
 #[derive(Clone, Copy)]
@@ -310,6 +346,8 @@ impl Kanata {
             #[cfg(target_os = "linux")]
             cfg.options.linux_opts.linux_use_trackpoint_property,
             #[cfg(target_os = "linux")]
+            &cfg.options.linux_opts.linux_output_name,
+            #[cfg(target_os = "linux")]
             match cfg.options.linux_opts.linux_output_bus_type {
                 LinuxCfgOutputBusType::BusUsb => evdev::BusType::BUS_USB,
                 LinuxCfgOutputBusType::BusI8042 => evdev::BusType::BUS_I8042,
@@ -317,7 +355,9 @@ impl Kanata {
         ) {
             Ok(kbd_out) => kbd_out,
             Err(err) => {
-                error!("Failed to open the output uinput device. Make sure you've added the user executing kanata to the `uinput` group");
+                error!(
+                    "Failed to open the output uinput device. Make sure you've added the user executing kanata to the `uinput` group"
+                );
                 bail!(err)
             }
         };
@@ -354,6 +394,9 @@ impl Kanata {
             kbd_out,
             cfg_paths: args.paths.clone(),
             cur_cfg_idx: 0,
+            included_files: Vec::new(), // Will be populated dynamically
+            #[cfg(feature = "watch")]
+            file_watcher: None,
             key_outputs: cfg.key_outputs,
             layout: cfg.layout,
             layer_info: cfg.layer_info,
@@ -371,9 +414,11 @@ impl Kanata {
             sequence_timeout: cfg.options.sequence_timeout,
             sequence_state: SequenceState::new(),
             sequences: cfg.sequences,
-            last_tick: instant::Instant::now(),
+            last_tick: web_time::Instant::now(),
             time_remainder: 0,
             live_reload_requested: false,
+            #[cfg(feature = "watch")]
+            file_watcher_restart_requested: false,
             overrides: cfg.overrides,
             override_states: OverrideStates::new(),
             #[cfg(target_os = "macos")]
@@ -429,8 +474,10 @@ impl Kanata {
                 .linux_device_detect_mode
                 .expect("parser should default to some"),
             waiting_for_idle: HashSet::default(),
+            waiting_for_physical_idle: HashSet::default(),
             vkeys_pending_release: HashMap::default(),
             ticks_since_idle: 0,
+            ticks_since_physical_idle: 0,
             movemouse_buffer: None,
             unmodded_keys: vec![],
             unmodded_mods: UnmodMods::empty(),
@@ -446,6 +493,12 @@ impl Kanata {
             allow_hardware_repeat: cfg.options.allow_hardware_repeat,
             macro_on_press_cancel_duration: 0,
             saved_clipboard_content: Default::default(),
+            #[cfg(any(
+                all(target_os = "windows", feature = "interception_driver"),
+                target_os = "linux",
+                target_os = "unknown"
+            ))]
+            mouse_movement_key: Arc::new(Mutex::new(cfg.options.mouse_movement_key)),
         })
     }
 
@@ -468,6 +521,8 @@ impl Kanata {
             #[cfg(target_os = "linux")]
             cfg.options.linux_opts.linux_use_trackpoint_property,
             #[cfg(target_os = "linux")]
+            &cfg.options.linux_opts.linux_output_name,
+            #[cfg(target_os = "linux")]
             match cfg.options.linux_opts.linux_output_bus_type {
                 LinuxCfgOutputBusType::BusUsb => evdev::BusType::BUS_USB,
                 LinuxCfgOutputBusType::BusI8042 => evdev::BusType::BUS_I8042,
@@ -475,7 +530,9 @@ impl Kanata {
         ) {
             Ok(kbd_out) => kbd_out,
             Err(err) => {
-                error!("Failed to open the output uinput device. Make sure you've added the user executing kanata to the `uinput` group");
+                error!(
+                    "Failed to open the output uinput device. Make sure you've added the user executing kanata to the `uinput` group"
+                );
                 bail!(err)
             }
         };
@@ -490,6 +547,9 @@ impl Kanata {
             kbd_out,
             cfg_paths: vec!["config string".into()],
             cur_cfg_idx: 0,
+            included_files: Vec::new(), // Will be populated dynamically
+            #[cfg(feature = "watch")]
+            file_watcher: None,
             key_outputs: cfg.key_outputs,
             layout: cfg.layout,
             layer_info: cfg.layer_info,
@@ -507,9 +567,11 @@ impl Kanata {
             sequence_timeout: cfg.options.sequence_timeout,
             sequence_state: SequenceState::new(),
             sequences: cfg.sequences,
-            last_tick: instant::Instant::now(),
+            last_tick: web_time::Instant::now(),
             time_remainder: 0,
             live_reload_requested: false,
+            #[cfg(feature = "watch")]
+            file_watcher_restart_requested: false,
             overrides: cfg.overrides,
             override_states: OverrideStates::new(),
             #[cfg(target_os = "macos")]
@@ -565,8 +627,10 @@ impl Kanata {
                 .linux_device_detect_mode
                 .expect("parser should default to some"),
             waiting_for_idle: HashSet::default(),
+            waiting_for_physical_idle: HashSet::default(),
             vkeys_pending_release: HashMap::default(),
             ticks_since_idle: 0,
+            ticks_since_physical_idle: 0,
             movemouse_buffer: None,
             unmodded_keys: vec![],
             unmodded_mods: UnmodMods::empty(),
@@ -582,6 +646,12 @@ impl Kanata {
             allow_hardware_repeat: cfg.options.allow_hardware_repeat,
             macro_on_press_cancel_duration: 0,
             saved_clipboard_content: Default::default(),
+            #[cfg(any(
+                all(target_os = "windows", feature = "interception_driver"),
+                target_os = "linux",
+                target_os = "unknown"
+            ))]
+            mouse_movement_key: Arc::new(Mutex::new(cfg.options.mouse_movement_key)),
         })
     }
 
@@ -678,10 +748,27 @@ impl Kanata {
         self.print_layer(cur_layer);
         self.macro_on_press_cancel_duration = 0;
 
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(any(
+            all(target_os = "windows", feature = "interception_driver"),
+            target_os = "linux",
+            target_os = "unknown"
+        ))]
         {
-            PRESSED_KEYS.lock().clear();
+            #[cfg(all(target_os = "windows", feature = "interception_driver"))]
+            {
+                if self.mouse_movement_key.lock().is_none()
+                    && cfg.options.mouse_movement_key.is_some()
+                {
+                    log::warn!(
+                        "defcfg option mouse-movement-key will not take effect until kanata is restarted!"
+                    );
+                }
+            }
+
+            *self.mouse_movement_key.lock() = cfg.options.mouse_movement_key;
         }
+
+        PRESSED_KEYS.lock().clear();
 
         #[cfg(feature = "tcp_server")]
         if let Some(tx) = _tx {
@@ -695,6 +782,21 @@ impl Kanata {
         }
         #[cfg(all(target_os = "windows", feature = "gui"))]
         send_gui_cfg_notice();
+
+        // Check if included files changed and flag for watcher restart
+        #[cfg(feature = "watch")]
+        {
+            use crate::file_watcher::discover_include_files;
+            let new_included_files = discover_include_files(&self.cfg_paths);
+            if self.included_files != new_included_files {
+                log::info!("Included files have changed, flagging file watcher for restart");
+                log::debug!("Old included files: {:?}", self.included_files);
+                log::debug!("New included files: {:?}", new_included_files);
+                self.file_watcher_restart_requested = true;
+                self.included_files = new_included_files;
+            }
+        }
+
         Ok(())
     }
 
@@ -744,21 +846,15 @@ impl Kanata {
         Ok(())
     }
 
-    /// Advance keyberon layout state and send events based on changes to its state.
-    /// Returns the number of ticks that elapsed.
-    fn handle_time_ticks(&mut self, tx: &Option<Sender<ServerMessage>>) -> Result<u16> {
-        const NS_IN_MS: u128 = 1_000_000;
-        let now = instant::Instant::now();
-        let ns_elapsed = now.duration_since(self.last_tick).as_nanos();
-        let ns_elapsed_with_rem = ns_elapsed + self.time_remainder;
-        let ms_elapsed = ns_elapsed_with_rem / NS_IN_MS;
-        self.time_remainder = ns_elapsed_with_rem % NS_IN_MS;
-
-        self.tick_ms(ms_elapsed, tx)?;
-
+    /// Returns the number of ms elapsed for the procesing loop according to current monotonic time
+    /// and stored internal state. Mutates the internal time-tracking state.
+    pub fn get_ms_elapsed(&mut self) -> u128 {
+        let now = web_time::Instant::now();
+        let ms_count_result = count_ms_elapsed(self.last_tick, now, self.time_remainder);
+        let ms_elapsed = ms_count_result.ms_elapsed;
+        self.time_remainder = ms_count_result.ms_remainder_in_ns;
         self.last_tick = match ms_elapsed {
-            0 => self.last_tick,
-            1..=10 => now,
+            0..=10 => ms_count_result.last_tick,
             // If too many ms elapsed, probably doing a tight loop of something that's quite
             // expensive, e.g. click spamming. To avoid a growing ms_elapsed due to trying and
             // failing to catch up, reset last_tick to the "actual now" instead the "past now"
@@ -766,8 +862,17 @@ impl Kanata {
             // 1000 ticks in 1ms on average. In practice, there will already be fewer than 1000
             // ticks in 1ms when running expensive operations, this just avoids having tens to
             // thousands of ticks all happening as soon as the expensive operations end.
-            _ => instant::Instant::now(),
+            _ => web_time::Instant::now(),
         };
+
+        ms_elapsed
+    }
+
+    /// Advance keyberon layout state and send events based on changes to its state.
+    /// Returns the number of ticks that elapsed.
+    fn handle_time_ticks(&mut self, tx: &Option<Sender<ServerMessage>>) -> Result<u16> {
+        let ms_elapsed = self.get_ms_elapsed();
+        self.tick_ms(ms_elapsed, tx)?;
 
         self.check_handle_layer_change(tx);
 
@@ -849,6 +954,7 @@ impl Kanata {
         self.handle_move_mouse()?;
         self.tick_sequence_state()?;
         self.tick_idle_timeout();
+        self.tick_physical_idle_timeout();
         self.macro_on_press_cancel_duration = self.macro_on_press_cancel_duration.saturating_sub(1);
         tick_record_state(&mut self.dynamic_macro_record_state);
         zippy_tick(self.caps_word.is_some());
@@ -1010,6 +1116,23 @@ impl Kanata {
         })
     }
 
+    fn tick_physical_idle_timeout(&mut self) {
+        if self.waiting_for_physical_idle.is_empty() {
+            return;
+        }
+        self.waiting_for_physical_idle.retain(|wfd| {
+            if self.ticks_since_physical_idle >= wfd.idle_duration {
+                // Process this and return false so that it is not retained.
+                let layout = self.layout.bm();
+                let Coord { x, y } = wfd.coord;
+                handle_fakekey_action(wfd.action, layout, x, y);
+                false
+            } else {
+                true
+            }
+        })
+    }
+
     /// Sends OS key events according to the change in key state between the current and the
     /// previous keyberon keystate. Also processes any custom actions.
     ///
@@ -1098,7 +1221,7 @@ impl Kanata {
         }
 
         if let Some(caps_word) = &mut self.caps_word {
-            if caps_word.maybe_add_lsft(cur_keys) == CapsWordNextState::End {
+            if caps_word.tick_maybe_add_lsft(cur_keys) == CapsWordNextState::End {
                 self.caps_word = None;
             }
         }
@@ -1233,76 +1356,26 @@ impl Kanata {
                 #[cfg(feature = "cmd")]
                 let mut cmds = vec![];
                 let mut prev_mouse_btn = None;
+                let mut reload_action: Option<ReloadAction> = None;
                 for custact in custacts.iter() {
                     match custact {
                         // For unicode, only send on the press. No repeat action is supported for this for
                         // now.
                         CustomAction::Unicode(c) => self.kbd_out.send_unicode(*c)?,
                         CustomAction::LiveReload => {
-                            live_reload_requested = true;
-                            log::info!(
-                                "Requested live reload of file: {}",
-                                self.cfg_paths[self.cur_cfg_idx].display()
-                            );
+                            reload_action = Some(ReloadAction::Reload);
                         }
                         CustomAction::LiveReloadNext => {
-                            live_reload_requested = true;
-                            self.cur_cfg_idx = if self.cur_cfg_idx == self.cfg_paths.len() - 1 {
-                                0
-                            } else {
-                                self.cur_cfg_idx + 1
-                            };
-                            log::info!(
-                                "Requested live reload of next file: {}",
-                                self.cfg_paths[self.cur_cfg_idx].display()
-                            );
+                            reload_action = Some(ReloadAction::ReloadNext);
                         }
                         CustomAction::LiveReloadPrev => {
-                            live_reload_requested = true;
-                            self.cur_cfg_idx = match self.cur_cfg_idx {
-                                0 => self.cfg_paths.len() - 1,
-                                i => i - 1,
-                            };
-                            log::info!(
-                                "Requested live reload of prev file: {}",
-                                self.cfg_paths[self.cur_cfg_idx].display()
-                            );
+                            reload_action = Some(ReloadAction::ReloadPrev);
                         }
                         CustomAction::LiveReloadNum(n) => {
-                            let n = usize::from(*n);
-                            live_reload_requested = true;
-                            match self.cfg_paths.get(n) {
-                                Some(path) => {
-                                    self.cur_cfg_idx = n;
-                                    log::info!("Requested live reload of file: {}", path.display(),);
-                                }
-                                None => {
-                                    log::error!("Requested live reload of config file number {}, but only {} config files were passed", n+1, self.cfg_paths.len());
-                                }
-                            }
+                            reload_action = Some(ReloadAction::ReloadNum(usize::from(*n)));
                         }
                         CustomAction::LiveReloadFile(path) => {
-                            let path = PathBuf::from(path);
-
-                            let result = self
-                                .cfg_paths
-                                .iter()
-                                .enumerate()
-                                .find(|(_idx, fpath)| **fpath == path);
-
-                            match result {
-                                Some((index, _path)) => {
-                                    log::info!(
-                                        "Requested live reload of file with path: {}",
-                                        path.display(),
-                                    );
-                                    live_reload_requested = true;
-                                    self.cur_cfg_idx = index;
-                                }
-                                None => {
-                                    log::error!("Requested live reload of file with path {}, but no such path was passed as an argument to Kanata", path.display());
-                                }
-                            }
+                            reload_action = Some(ReloadAction::ReloadFile(path.clone()));
                         }
                         CustomAction::Mouse(btn) => {
                             log::debug!("click     {:?}", btn);
@@ -1534,6 +1607,12 @@ impl Kanata {
                                 self.sequence_state.activate(*input_mode, *timeout);
                             }
                         }
+                        CustomAction::SequenceNoerase(noerase_count) => {
+                            if let Some(state) = self.sequence_state.get_active() {
+                                log::debug!("pressed cancel sequence key");
+                                add_noerase(state, *noerase_count);
+                            }
+                        }
                         CustomAction::Repeat => {
                             let keycode = self.last_pressed_key;
                             let osc: OsCode = keycode.into();
@@ -1543,7 +1622,7 @@ impl Kanata {
                                 if let Some(ref mut cw) = self.caps_word {
                                     cur_keys.push(keycode);
                                     let prev_len = cur_keys.len();
-                                    cw.maybe_add_lsft(cur_keys);
+                                    cw.tick_maybe_add_lsft(cur_keys);
                                     if cur_keys.len() > prev_len {
                                         do_caps_word = true;
                                         press_key(&mut self.kbd_out, OsCode::KEY_LEFTSHIFT)?;
@@ -1597,9 +1676,11 @@ impl Kanata {
                         }
                         CustomAction::CapsWord(cfg) => match cfg.repress_behaviour {
                             CapsWordRepressBehaviour::Overwrite => {
+                                log::trace!("caps-word overwrite");
                                 self.caps_word = Some(CapsWordState::new(cfg));
                             }
                             CapsWordRepressBehaviour::Toggle => {
+                                log::trace!("caps-word toggle");
                                 self.caps_word = match self.caps_word {
                                     Some(_) => None,
                                     None => Some(CapsWordState::new(cfg)),
@@ -1612,6 +1693,10 @@ impl Kanata {
                         CustomAction::FakeKeyOnIdle(fkd) => {
                             self.ticks_since_idle = 0;
                             self.waiting_for_idle.insert(*fkd);
+                        }
+                        CustomAction::FakeKeyOnPhysicalIdle(fkd) => {
+                            self.ticks_since_physical_idle = 0;
+                            self.waiting_for_physical_idle.insert(*fkd);
                         }
                         CustomAction::FakeKeyHoldForDuration(fk_hfd) => {
                             let duration = fk_hfd.hold_duration;
@@ -1649,12 +1734,50 @@ impl Kanata {
                         | CustomAction::Unmodded { .. }
                         | CustomAction::Unshifted { .. }
                         // Note: ReverseReleaseOrder is already handled earlier on.
-                        | CustomAction::ReverseReleaseOrder { .. }
+                        | CustomAction::ReverseReleaseOrder
                         | CustomAction::CancelMacroOnRelease => {}
                     }
                 }
                 #[cfg(feature = "cmd")]
                 run_multi_cmd(cmds);
+
+                // Process reload actions after releasing the layout borrow
+                if let Some(action) = reload_action {
+                    let reload_succeeded = match action {
+                        ReloadAction::Reload => {
+                            self.request_live_reload();
+                            true
+                        }
+                        ReloadAction::ReloadNext => {
+                            self.request_live_reload_next();
+                            true
+                        }
+                        ReloadAction::ReloadPrev => {
+                            self.request_live_reload_prev();
+                            true
+                        }
+                        ReloadAction::ReloadNum(n) => {
+                            if let Err(e) = self.request_live_reload_num(n) {
+                                log::error!("{}", e);
+                                false
+                            } else {
+                                true
+                            }
+                        }
+                        ReloadAction::ReloadFile(path) => {
+                            if let Err(e) = self.request_live_reload_file(path) {
+                                log::error!("{}", e);
+                                false
+                            } else {
+                                true
+                            }
+                        }
+                    };
+
+                    if reload_succeeded {
+                        live_reload_requested = true;
+                    }
+                }
             }
 
             CustomEvent::Release(custacts) => {
@@ -1723,8 +1846,8 @@ impl Kanata {
                             );
                             pbtn
                         }
-                        CustomAction::Delay(delay) => {
-                            log::debug!("on-press: sleeping for {delay} ms");
+                        CustomAction::DelayOnRelease(delay) => {
+                            log::debug!("on-release: sleeping for {delay} ms");
                             std::thread::sleep(time::Duration::from_millis((*delay).into()));
                             pbtn
                         }
@@ -1792,6 +1915,109 @@ impl Kanata {
                 return;
             }
         }
+    }
+
+    /// Request a live reload of the current configuration file.
+    pub fn request_live_reload(&mut self) {
+        self.live_reload_requested = true;
+        log::info!(
+            "Requested live reload of file: {}",
+            self.cfg_paths[self.cur_cfg_idx].display()
+        );
+    }
+
+    /// Handle a client command from TCP server and return a result.
+    /// This centralizes validation logic and provides proper error messages.
+    #[cfg(feature = "tcp_server")]
+    pub fn handle_client_command(
+        &mut self,
+        command: kanata_tcp_protocol::ClientMessage,
+    ) -> Result<()> {
+        use kanata_tcp_protocol::ClientMessage;
+
+        match command {
+            ClientMessage::Reload {} => {
+                self.request_live_reload();
+                Ok(())
+            }
+            ClientMessage::ReloadNext {} => {
+                self.request_live_reload_next();
+                Ok(())
+            }
+            ClientMessage::ReloadPrev {} => {
+                self.request_live_reload_prev();
+                Ok(())
+            }
+            ClientMessage::ReloadNum { index } => self.request_live_reload_num(index),
+            ClientMessage::ReloadFile { path } => self.request_live_reload_file(path),
+            _ => {
+                // For non-reload commands, we don't validate here - they're handled directly in tcp_server
+                Ok(())
+            }
+        }
+    }
+
+    /// Request a live reload of the next configuration file.
+    pub fn request_live_reload_next(&mut self) {
+        self.live_reload_requested = true;
+        self.cur_cfg_idx = if self.cur_cfg_idx == self.cfg_paths.len() - 1 {
+            0
+        } else {
+            self.cur_cfg_idx + 1
+        };
+        log::info!(
+            "Requested live reload of next file: {}",
+            self.cfg_paths[self.cur_cfg_idx].display()
+        );
+    }
+
+    /// Request a live reload of the previous configuration file.
+    pub fn request_live_reload_prev(&mut self) {
+        self.live_reload_requested = true;
+        if self.cur_cfg_idx == 0 {
+            self.cur_cfg_idx = self.cfg_paths.len() - 1;
+        } else {
+            self.cur_cfg_idx -= 1;
+        }
+        log::info!(
+            "Requested live reload of previous file: {}",
+            self.cfg_paths[self.cur_cfg_idx].display()
+        );
+    }
+
+    /// Request a live reload of the configuration file at the specified index.
+    pub fn request_live_reload_num(&mut self, index: usize) -> Result<()> {
+        if index >= self.cfg_paths.len() {
+            bail!(
+                "config index {} out of bounds: only {} configs available",
+                index,
+                self.cfg_paths.len()
+            );
+        }
+        self.live_reload_requested = true;
+        self.cur_cfg_idx = index;
+        log::info!(
+            "Requested live reload of config file {}: {}",
+            index,
+            self.cfg_paths[self.cur_cfg_idx].display()
+        );
+        Ok(())
+    }
+
+    /// Request a live reload of the specified configuration file.
+    pub fn request_live_reload_file(&mut self, path: String) -> Result<()> {
+        let new_path = std::path::PathBuf::from(&path);
+        if !new_path.exists() {
+            bail!("config file does not exist: {}", path);
+        }
+        self.live_reload_requested = true;
+        self.cfg_paths.push(new_path);
+        self.cur_cfg_idx = self.cfg_paths.len() - 1;
+        log::info!(
+            "Requested live reload of file: {}",
+            self.cfg_paths[self.cur_cfg_idx].display()
+        );
+        Ok(())
     }
 
     #[allow(unused_variables)]
@@ -1908,7 +2134,7 @@ impl Kanata {
             #[cfg(all(not(feature = "interception_driver"), target_os = "windows"))]
             let mut idle_clear_happened = false;
             #[cfg(all(not(feature = "interception_driver"), target_os = "windows"))]
-            let mut last_input_time = instant::Instant::now();
+            let mut last_input_time = web_time::Instant::now();
 
             let err = loop {
                 let can_block = {
@@ -1927,7 +2153,7 @@ impl Kanata {
                     match rx.recv() {
                         Ok(kev) => {
                             let mut k = kanata.lock();
-                            let now = instant::Instant::now()
+                            let now = web_time::Instant::now()
                                 .checked_sub(time::Duration::from_millis(1))
                                 .expect("subtract 1ms from current time");
 
@@ -1935,36 +2161,33 @@ impl Kanata {
                                 not(feature = "interception_driver"),
                                 target_os = "windows"
                             ))]
-                            {
-                                // If kanata has been inactive for long enough, clear all states.
-                                // This won't trigger if there are macros running, or if a key is
-                                // held down for a long time and is sending OS repeats. The reason
-                                // for this code is in cases like Win+L which locks the Windows
-                                // desktop. When this happens, the Win key and L key will be stuck
-                                // as pressed in the kanata state because LLHOOK kanata cannot read
-                                // keys in the lock screen or administrator applications. So this
-                                // is heuristic to detect such an issue and clear states assuming
-                                // that's what happened.
-                                //
-                                // Only states in the normal key row are cleared, since those are
-                                // the states that might be stuck. A real use case might be to have
-                                // a fake key pressed for a long period of time, so make sure those
-                                // are not cleared.
-                                if (now - last_input_time)
-                                    > time::Duration::from_secs(LLHOOK_IDLE_TIME_SECS_CLEAR_INPUTS)
-                                {
-                                    log::debug!(
-                                        "clearing keyberon normal key states due to inactivity"
-                                    );
-                                    let layout = k.layout.bm();
-                                    release_normalkey_states(layout);
-                                    PRESSED_KEYS.lock().clear();
-                                }
-                            }
+                            clear_states_from_inactivity(
+                                &mut k,
+                                now,
+                                last_input_time,
+                                &mut idle_clear_happened,
+                            );
                             k.last_tick = now;
 
+                            // Check for live reload BEFORE processing the key event
+                            if k.live_reload_requested
+                                && ((k.prev_keys.is_empty() && k.cur_keys.is_empty())
+                                    || k.ticks_since_idle > 1000)
+                            {
+                                k.live_reload_requested = false;
+                                if let Err(e) = k.do_live_reload(&tx) {
+                                    log::error!("live reload failed {e}");
+                                }
+                            }
+
+                            // Handle file watcher restart if needed
+                            #[cfg(feature = "watch")]
+                            if k.file_watcher_restart_requested {
+                                crate::file_watcher::restart_watcher(&mut k, kanata.clone());
+                            }
+
                             #[cfg(feature = "perf_logging")]
-                            let start = instant::Instant::now();
+                            let start = web_time::Instant::now();
 
                             if let Err(e) = k.handle_input_event(&kev) {
                                 break e;
@@ -1990,7 +2213,7 @@ impl Kanata {
                                 (start.elapsed()).as_nanos()
                             );
                             #[cfg(feature = "perf_logging")]
-                            let start = instant::Instant::now();
+                            let start = web_time::Instant::now();
 
                             match k.handle_time_ticks(&tx) {
                                 Ok(ms) => ms_elapsed = ms,
@@ -2012,8 +2235,25 @@ impl Kanata {
                     let mut k = kanata.lock();
                     match rx.try_recv() {
                         Ok(kev) => {
+                            // Check for live reload BEFORE processing the key event
+                            if k.live_reload_requested
+                                && ((k.prev_keys.is_empty() && k.cur_keys.is_empty())
+                                    || k.ticks_since_idle > 1000)
+                            {
+                                k.live_reload_requested = false;
+                                if let Err(e) = k.do_live_reload(&tx) {
+                                    log::error!("live reload failed {e}");
+                                }
+                            }
+
+                            // Handle file watcher restart if needed
+                            #[cfg(feature = "watch")]
+                            if k.file_watcher_restart_requested {
+                                crate::file_watcher::restart_watcher(&mut k, kanata.clone());
+                            }
+
                             #[cfg(feature = "perf_logging")]
-                            let start = instant::Instant::now();
+                            let start = web_time::Instant::now();
 
                             if let Err(e) = k.handle_input_event(&kev) {
                                 break e;
@@ -2023,7 +2263,7 @@ impl Kanata {
                                 target_os = "windows"
                             ))]
                             {
-                                last_input_time = instant::Instant::now();
+                                last_input_time = web_time::Instant::now();
                             }
                             #[cfg(all(
                                 not(feature = "interception_driver"),
@@ -2039,7 +2279,7 @@ impl Kanata {
                                 (start.elapsed()).as_nanos()
                             );
                             #[cfg(feature = "perf_logging")]
-                            let start = instant::Instant::now();
+                            let start = web_time::Instant::now();
 
                             match k.handle_time_ticks(&tx) {
                                 Ok(ms) => ms_elapsed = ms,
@@ -2054,7 +2294,7 @@ impl Kanata {
                         }
                         Err(TryRecvError::Empty) => {
                             #[cfg(feature = "perf_logging")]
-                            let start = instant::Instant::now();
+                            let start = web_time::Instant::now();
 
                             match k.handle_time_ticks(&tx) {
                                 Ok(ms) => ms_elapsed = ms,
@@ -2071,34 +2311,12 @@ impl Kanata {
                                 not(feature = "interception_driver"),
                                 target_os = "windows"
                             ))]
-                            {
-                                // If kanata has been inactive for long enough, clear all states.
-                                // This won't trigger if there are macros running, or if a key is
-                                // held down for a long time and is sending OS repeats. The reason
-                                // for this code is in case like Win+L which locks the Windows
-                                // desktop. When this happens, the Win key and L key will be stuck
-                                // as pressed in the kanata state because LLHOOK kanata cannot read
-                                // keys in the lock screen or administrator applications. So this
-                                // is heuristic to detect such an issue and clear states assuming
-                                // that's what happened.
-                                //
-                                // Only states in the normal key row are cleared, since those are
-                                // the states that might be stuck. A real use case might be to have
-                                // a fake key pressed for a long period of time, so make sure those
-                                // are not cleared.
-                                if (instant::Instant::now() - (last_input_time))
-                                    > time::Duration::from_secs(LLHOOK_IDLE_TIME_SECS_CLEAR_INPUTS)
-                                    && !idle_clear_happened
-                                {
-                                    idle_clear_happened = true;
-                                    log::debug!(
-                                        "clearing keyberon normal key states due to inactivity"
-                                    );
-                                    let layout = k.layout.bm();
-                                    release_normalkey_states(layout);
-                                    PRESSED_KEYS.lock().clear();
-                                }
-                            }
+                            clear_states_from_inactivity(
+                                &mut k,
+                                web_time::Instant::now(),
+                                last_input_time,
+                                &mut idle_clear_happened,
+                            );
 
                             drop(k);
                             std::thread::sleep(time::Duration::from_millis(1));
@@ -2125,7 +2343,16 @@ impl Kanata {
         // Note: checking waiting_for_idle can not be part of the computation for
         // is_idle() since incrementing ticks_since_idle is dependent on the return
         // value of is_idle().
-        let counting_idle_ticks = !k.waiting_for_idle.is_empty() || k.live_reload_requested;
+        let counting_idle_ticks = !k.waiting_for_idle.is_empty() || k.live_reload_requested || {
+            #[cfg(feature = "watch")]
+            {
+                k.file_watcher_restart_requested
+            }
+            #[cfg(not(feature = "watch"))]
+            {
+                false
+            }
+        };
         if !is_idle {
             k.ticks_since_idle = 0;
         } else if is_idle && counting_idle_ticks {
@@ -2133,6 +2360,20 @@ impl Kanata {
             #[cfg(feature = "perf_logging")]
             log::info!("ticks since idle: {}", k.ticks_since_idle);
         }
+
+        let counting_physical_idle_ticks = if k.waiting_for_physical_idle.is_empty() {
+            false
+        } else {
+            let is_physical_idle = PRESSED_KEYS.lock().is_empty();
+            if is_physical_idle {
+                k.ticks_since_physical_idle =
+                    k.ticks_since_physical_idle.saturating_add(ms_elapsed);
+            } else {
+                k.ticks_since_physical_idle = 0;
+            }
+            true
+        };
+
         // NOTE: this check must not be part of `is_idle` because its falsiness
         // does not mean that kanata is in a non-idle state, just that we
         // haven't done enough ticks yet to properly compute key-timing.
@@ -2151,12 +2392,25 @@ impl Kanata {
             .as_ref()
             .map(|cv2| cv2.accepts_chords_chv2())
             .unwrap_or(true);
-        is_idle && !counting_idle_ticks && passed_max_switch_timing_check && chordsv2_accepts_chords
+        is_idle
+            && !counting_idle_ticks
+            && !counting_physical_idle_ticks
+            && passed_max_switch_timing_check
+            && chordsv2_accepts_chords
     }
 
     pub fn is_idle(&self) -> bool {
         let pressed_keys_means_not_idle =
-            !self.waiting_for_idle.is_empty() || self.live_reload_requested;
+            !self.waiting_for_idle.is_empty() || self.live_reload_requested || {
+                #[cfg(feature = "watch")]
+                {
+                    self.file_watcher_restart_requested
+                }
+                #[cfg(not(feature = "watch"))]
+                {
+                    false
+                }
+            };
         self.layout.b().queue.is_empty()
             && zippy_is_idle()
             && self.layout.b().waiting.is_none()
@@ -2299,9 +2553,9 @@ fn check_for_exit(_event: &KeyEvent) {
                 native_windows_gui::stop_thread_dispatch();
                 #[cfg(feature = "interception_driver")]
                 send_gui_exit_notice(); // interception driver is running in another thread to allow
-                                        // GUI take the main one, so it's calling check_for_exit
-                                        // from a thread that has no access to the main one, so
-                                        // can't stop main thread's dispatch
+                // GUI take the main one, so it's calling check_for_exit
+                // from a thread that has no access to the main one, so
+                // can't stop main thread's dispatch
             }
             #[cfg(all(
                 not(target_os = "linux"),

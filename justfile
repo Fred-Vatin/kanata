@@ -33,6 +33,7 @@ sha256sums output_dir:
 test:
   cargo test -p kanata -p kanata-parser -p kanata-keyberon -- --nocapture
   cargo test --features=simulated_output sim_tests
+  cargo test --features=simulated_output -- must_be_single_threaded --ignored --test-threads=1
   cargo clippy --all
 
 fmt:
@@ -50,17 +51,9 @@ ahkf:
   cargo fmt    --all
   cargo clippy --all --fix --features=passthru_ahk -- -D warnings
 
-use_cratesio_deps:
-  sed -i 's/^# \(kanata-\(keyberon\|parser\|tcp-protocol\) = ".*\)$/\1/' Cargo.toml parser/Cargo.toml
-  sed -i 's/^\(kanata-\(keyberon\|parser\|tcp-protocol\) = .*path.*\)$/# \1/' Cargo.toml parser/Cargo.toml
-
-use_local_deps:
-  sed -i 's/^\(kanata-\(keyberon\|parser\|tcp-protocol\) = ".*\)$/# \1/' Cargo.toml parser/Cargo.toml
-  sed -i 's/^# \(kanata-\(keyberon\|parser\|tcp-protocol\) = .*path.*\)$/\1/' Cargo.toml parser/Cargo.toml
-
 change_subcrate_versions version:
   sed -i 's/^version = ".*"$/version = "{{version}}"/' parser/Cargo.toml tcp_protocol/Cargo.toml keyberon/Cargo.toml
-  sed -i 's/^\(#\? \?kanata-\(keyberon\|parser\|tcp-protocol\)\) = ".*$/\1 = "{{version}}"/' Cargo.toml parser/Cargo.toml
+  sed -i 's/^\(#\? \?kanata-\(keyberon\|parser\|tcp-protocol\).*version\) = "[0-9.]*"/\1 = "{{version}}"/' Cargo.toml parser/Cargo.toml
 
 cov:
   cargo llvm-cov clean --workspace
@@ -75,6 +68,7 @@ publish:
   cd keyberon && cargo publish
   cd tcp_protocol && cargo publish
   cd parser && cargo publish
+  cargo publish
 
 # Include the trailing `\` or `/` in the output_dir parameter. The parameter should be an absolute path.
 cfg_to_html output_dir:
@@ -84,3 +78,13 @@ cfg_to_html output_dir:
 # Include the trailing `\` or `/` in the output_dir parameter. The parameter should be an absolute path.
 wasm_pack output_dir:
   cd wasm; wasm-pack build --target web; cd pkg; cp kanata_wasm_bg.wasm "{{output_dir}}"; cp kanata_wasm.js "{{output_dir}}"
+
+wasm-build output_dir:
+  cd wasm; echo "*" > pkg/.gitignore
+  cd wasm; cargo build --lib --release --target wasm32-unknown-unknown
+  cd wasm; wasm-bindgen target/wasm32-unknown-unknown/release/kanata_wasm.wasm --out-dir pkg --typescript --target web
+  wasm-opt wasm/pkg/kanata_wasm_bg.wasm -o wasm/pkg/kanata_wasm.wasm-opt.wasm -Oz
+  rm wasm/pkg/kanata_wasm_bg.wasm
+  mv wasm/pkg/kanata_wasm.wasm-opt.wasm wasm/pkg/kanata_wasm_bg.wasm
+  cp wasm/pkg/kanata_wasm_bg.wasm "{{output_dir}}"
+  cp wasm/pkg/kanata_wasm.js "{{output_dir}}"

@@ -517,6 +517,14 @@ impl TryFrom<OsCode> for PageCode {
                 page: 0x07,
                 code: 0x85,
             }),
+            OsCode::KEY_HANGEUL => Ok(PageCode {
+                page: 0x07,
+                code: 0x90,
+            }),
+            OsCode::KEY_HANJA => Ok(PageCode {
+                page: 0x07,
+                code: 0x91,
+            }),
             OsCode::KEY_ALTERASE => Ok(PageCode {
                 page: 0x07,
                 code: 0x99,
@@ -624,6 +632,26 @@ impl TryFrom<OsCode> for PageCode {
             OsCode::KEY_SEARCH => Ok(PageCode {
                 page: 0xFF,
                 code: 0x01,
+            }),
+            OsCode::KEY_249 => Ok(PageCode {
+                page: 0x0C,
+                code: 0x221,
+            }),
+            OsCode::KEY_250 => Ok(PageCode {
+                page: 0x0C,
+                code: 0xCF,
+            }),
+            OsCode::KEY_251 => Ok(PageCode {
+                page: 0x01,
+                code: 0x9B,
+            }),
+            OsCode::KEY_252 => Ok(PageCode {
+                page: 0x0C,
+                code: 0x29F,
+            }),
+            OsCode::KEY_253 => Ok(PageCode {
+                page: 0x0C,
+                code: 0x2A0,
             }),
             // OsCode::KEY_FN_ESC          => 0x07,
             // OsCode::KEY_FN_F1           => 0x07,
@@ -1157,6 +1185,14 @@ impl TryFrom<PageCode> for OsCode {
             } => Ok(OsCode::KEY_KPCOMMA),
             PageCode {
                 page: 0x07,
+                code: 0x90,
+            } => Ok(OsCode::KEY_HANGEUL),
+            PageCode {
+                page: 0x07,
+                code: 0x91,
+            } => Ok(OsCode::KEY_HANJA),
+            PageCode {
+                page: 0x07,
                 code: 0x99,
             } => Ok(OsCode::KEY_ALTERASE),
             PageCode {
@@ -1255,6 +1291,26 @@ impl TryFrom<PageCode> for OsCode {
                 page: 0xFF,
                 code: 0x01,
             } => Ok(OsCode::KEY_SEARCH),
+            PageCode {
+                page: 0x0C,
+                code: 0x221,
+            } => Ok(OsCode::KEY_249),
+            PageCode {
+                page: 0x0C,
+                code: 0xCF,
+            } => Ok(OsCode::KEY_250),
+            PageCode {
+                page: 0x01,
+                code: 0x9B,
+            } => Ok(OsCode::KEY_251),
+            PageCode {
+                page: 0x0C,
+                code: 0x29F,
+            } => Ok(OsCode::KEY_252),
+            PageCode {
+                page: 0x0C,
+                code: 0x2A0,
+            } => Ok(OsCode::KEY_253),
             _ => Err("PageCode unrecognized!"),
         }
     }

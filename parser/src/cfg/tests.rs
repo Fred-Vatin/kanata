@@ -1,6 +1,6 @@
 use super::*;
 #[allow(unused_imports)]
-use crate::cfg::sexpr::{parse, Span};
+use crate::cfg::sexpr::{Span, parse};
 use kanata_keyberon::action::BooleanOperator::*;
 
 use std::sync::{Mutex, MutexGuard};
@@ -57,13 +57,11 @@ fn parse_cfg(cfg: &str) -> Result<IntermediateCfg> {
         Err("env vars not implemented".into()),
     );
     if let Ok(ref icfg) = icfg {
-        assert!(icfg
-            .klayers
-            .layers
-            .iter()
-            .all(|layer| layer[usize::from(NORMAL_KEY_ROW)]
+        assert!(icfg.klayers.layers.iter().all(|layer| {
+            layer[usize::from(NORMAL_KEY_ROW)]
                 .iter()
-                .all(|action| *action != DEFAULT_ACTION)));
+                .all(|action| *action != DEFAULT_ACTION)
+        }));
         #[cfg(any(target_os = "linux", target_os = "unknown"))]
         assert!(icfg.options.linux_opts.linux_device_detect_mode.is_some());
     }
@@ -1400,6 +1398,7 @@ fn parse_all_defcfg() {
   linux-unicode-termination space
   linux-x11-repeat-delay-rate 400,50
   linux-use-trackpoint-property yes
+  linux-output-device-name "Kanata Test"
   linux-output-device-bus-type USB
   tray-icon symbols.ico
   icon-match-layer-name no
@@ -1448,9 +1447,10 @@ fn parse_defcfg_linux_output_bus() {
 (deflayer base a)
 "#;
     let err = parse_cfg(source).expect_err("should err");
-    assert!(err
-        .msg
-        .contains("Invalid value for linux-output-device-bus-type"));
+    assert!(
+        err.msg
+            .contains("Invalid value for linux-output-device-bus-type")
+    );
 }
 
 #[test]
@@ -1489,9 +1489,10 @@ fn using_parentheses_in_deflayer_directly_fails_with_custom_message() {
         Err("env vars not implemented".into()),
     )
     .expect_err("should err");
-    assert!(err
-        .msg
-        .contains("You can't put parentheses in deflayer directly"));
+    assert!(
+        err.msg
+            .contains("You can't put parentheses in deflayer directly")
+    );
 }
 
 #[test]
@@ -1513,9 +1514,10 @@ fn using_escaped_parentheses_in_deflayer_fails_with_custom_message() {
         Err("env vars not implemented".into()),
     )
     .expect_err("should err");
-    assert!(err
-        .msg
-        .contains("Escaping shifted characters with `\\` is currently not supported"));
+    assert!(
+        err.msg
+            .contains("Escaping shifted characters with `\\` is currently not supported")
+    );
 }
 
 #[test]
@@ -1948,7 +1950,7 @@ fn test_defaliasenvcond() {
         ""
     })
     .expect("parses");
-    assert!(s.aliases.get("a").is_none());
+    assert!(!s.aliases.contains_key("a"));
 }
 
 #[test]

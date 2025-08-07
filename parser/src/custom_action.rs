@@ -3,7 +3,7 @@
 //! When adding a new custom action, the macro section of the config.adoc documentation may need to
 //! be updated, to include the new action to the documented list of supported actions in macro.
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use core::fmt;
 use kanata_keyberon::key_code::KeyCode;
 
@@ -27,6 +27,7 @@ pub enum CustomAction {
         action: FakeKeyAction,
     },
     FakeKeyOnIdle(FakeKeyOnIdle),
+    FakeKeyOnPhysicalIdle(FakeKeyOnIdle),
     FakeKeyHoldForDuration(FakeKeyHoldForDuration),
     Delay(u16),
     DelayOnRelease(u16),
@@ -55,6 +56,12 @@ pub enum CustomAction {
     },
     SequenceCancel,
     SequenceLeader(u16, SequenceInputMode),
+    /// Purpose:
+    /// In case the user has dead keys in their OS layout, they may wish to send fewer backspaces upon
+    /// a successful completion of visible-backspaced sequences, because the number of key events
+    /// is larger than the number of backspace-able symbols typed within the application.
+    /// This custom action is a marker to accomplish the use case.
+    SequenceNoerase(u16),
     LiveReload,
     LiveReloadNext,
     LiveReloadPrev,
@@ -239,7 +246,9 @@ impl SequenceInputMode {
     }
 
     pub fn err_msg() -> String {
-        format!("sequence input mode must be one of: {SEQ_VISIBLE_BACKSPACED}, {SEQ_HIDDEN_SUPPRESSED}, {SEQ_HIDDEN_DELAY_TYPE}")
+        format!(
+            "sequence input mode must be one of: {SEQ_VISIBLE_BACKSPACED}, {SEQ_HIDDEN_SUPPRESSED}, {SEQ_HIDDEN_DELAY_TYPE}"
+        )
     }
 }
 
@@ -282,7 +291,9 @@ impl LogLevel {
     }
 
     pub fn err_msg() -> String {
-        format!("log level must be one of: {LOG_LEVEL_DEBUG}, {LOG_LEVEL_INFO}, {LOG_LEVEL_WARN}, {LOG_LEVEL_ERROR}, {LOG_LEVEL_NONE}")
+        format!(
+            "log level must be one of: {LOG_LEVEL_DEBUG}, {LOG_LEVEL_INFO}, {LOG_LEVEL_WARN}, {LOG_LEVEL_ERROR}, {LOG_LEVEL_NONE}"
+        )
     }
 }
 

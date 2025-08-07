@@ -37,6 +37,7 @@ impl KbdOut {
     pub fn new(
         _s: &Option<String>,
         _tp: bool,
+        _name: &str,
         _bustype: evdev::BusType,
     ) -> Result<Self, io::Error> {
         Ok(Self { tx_kout: None })
@@ -53,11 +54,15 @@ impl KbdOut {
             match tx_kout.send(event) {
                 // send won't block for an async channel
                 Ok(res) => {
-                    debug!("✓ tx_kout → rx_kout@key_out(dll) ‘{event}’ from send_out_ev_msg@sim_passthru(oskbd)");
+                    debug!(
+                        "✓ tx_kout → rx_kout@key_out(dll) ‘{event}’ from send_out_ev_msg@sim_passthru(oskbd)"
+                    );
                     return Ok(res);
                 }
                 Err(SendError(event)) => {
-                    error!("✗ tx_kout → rx_kout@key_out(dll) ‘{event}’ from send_out_ev_msg@sim_passthru(oskbd)");
+                    error!(
+                        "✗ tx_kout → rx_kout@key_out(dll) ‘{event}’ from send_out_ev_msg@sim_passthru(oskbd)"
+                    );
                     return Err(IoErr::new(
                         NotConnected,
                         format!("Failed sending sending {event}"),

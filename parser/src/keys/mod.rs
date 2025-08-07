@@ -213,7 +213,7 @@ pub fn str_to_oscode(s: &str) -> Option<OsCode> {
         "KeyL" | "l" => OsCode::KEY_L,
         "Semicolon" | "scln" | "︔" => OsCode::KEY_SEMICOLON,
         "Quote" | "apo" | "apos" => OsCode::KEY_APOSTROPHE,
-        "Enter" | "ret" | "return" | "ent" | "enter" | "⏎" | "↩" | "⌤" | "␤" => OsCode::KEY_ENTER,
+        "Enter" | "ret" | "return" | "ent" | "enter" | "⏎" | "↩" | "↵" | "↲" | "⤶" | "⎆" | "⌤" | "␤" => OsCode::KEY_ENTER,
         "ShiftLeft" | "lshift" | "lshft" | "lsft" | "shft" | "sft" | "‹⇧" => OsCode::KEY_LEFTSHIFT,
         "KeyZ" | "z" => OsCode::KEY_Z,
         "KeyX" | "x" => OsCode::KEY_X,
@@ -238,7 +238,7 @@ pub fn str_to_oscode(s: &str) -> Option<OsCode> {
         "Numpad7" | "kp7" | "🔢₇" => OsCode::KEY_KP7,
         "Numpad8" | "kp8" | "🔢₈" => OsCode::KEY_KP8,
         "Numpad9" | "kp9" | "🔢₉" => OsCode::KEY_KP9,
-        "NumpadEnter" | "kprt" | "🔢⏎" | "🔢↩" | "🔢⌤" | "🔢␤" => OsCode::KEY_KPENTER,
+        "NumpadEnter" | "kprt" | "🔢⏎" | "🔢↩" | "🔢↵" | "🔢↲" | "🔢⤶" | "🔢⎆" | "🔢⌤" | "🔢␤" => OsCode::KEY_KPENTER,
         "NumpadDivide" | "kp/" | "🔢⁄" => OsCode::KEY_KPSLASH,
         "NumpadAdd" | "kp+" | "🔢₊" => OsCode::KEY_KPPLUS,
         "NumpadMultiply" | "kp*" | "🔢∗" => OsCode::KEY_KPASTERISK,
@@ -257,25 +257,25 @@ pub fn str_to_oscode(s: &str) -> Option<OsCode> {
         "ControlLeft" | "lctrl" | "lctl" | "ctl" | "‹⎈" | "‹⌃" => OsCode::KEY_LEFTCTRL,
         "AltLeft" | "lalt" | "alt" | "‹⎇" | "‹⌥" => OsCode::KEY_LEFTALT,
         "Space" | "spc" | "␠" | "␣" => OsCode::KEY_SPACE,
-        "AltRight" | "ralt" | "⎇›" | "⌥›" => OsCode::KEY_RIGHTALT,
+        "AltRight" | "ralt" | "altgr" | "⎇›" | "⌥›" | "⇮" => OsCode::KEY_RIGHTALT,
         "ContextMenu" | "comp" | "cmps" | "cmp" | "menu" | "apps" | "▤" | "☰" | "𝌆" => OsCode::KEY_COMPOSE,
         "🎛" => OsCode::KEY_DASHBOARD,
         // Also known as Windows, GUI, Comand, Super
-        "MetaLeft" | "lmeta" | "lmet" | "met" | "‹◆" | "‹⌘" | "‹❖" => OsCode::KEY_LEFTMETA,
-        "MetaRight" | "rmeta" | "rmet" | "◆›" | "⌘›" | "❖›"  => OsCode::KEY_RIGHTMETA,
+        "MetaLeft" | "lmeta" | "lmet" | "met" | "‹◆" | "‹⌘" | "‹❖" | "‹⊞" => OsCode::KEY_LEFTMETA,
+        "MetaRight" | "rmeta" | "rmet" | "◆›" | "⌘›" | "❖›" | "⊞›" => OsCode::KEY_RIGHTMETA,
         "ControlRight" | "rctrl" | "rctl" | "⎈›" | "⌃›" => OsCode::KEY_RIGHTCTRL,
         "Delete" | "del" | "␡" | "⌦" => OsCode::KEY_DELETE,
         "Insert" | "ins" | "⎀" => OsCode::KEY_INSERT,
         "BrowserBack" | "bck" => OsCode::KEY_BACK,
         "BrowserForward" | "fwd" => OsCode::KEY_FORWARD,
-        "PageUp" | "pgup" | "⇞" => OsCode::KEY_PAGEUP,
-        "PageDown" | "pgdn" | "⇟" => OsCode::KEY_PAGEDOWN,
-        "ArrowUp" | "up" | "▲" => OsCode::KEY_UP,
-        "ArrowDown" | "down" | "▼" => OsCode::KEY_DOWN,
-        "ArrowLeft" | "lft" | "left" | "◀" => OsCode::KEY_LEFT,
-        "ArrowRight" | "rght" | "▶" => OsCode::KEY_RIGHT,
-        "Home" | "home" | "⇤" | "⤒" | "↖" => OsCode::KEY_HOME,
-        "End" | "end" | "⇥" | "⤓" | "↘" => OsCode::KEY_END,
+        "PageUp" | "pgup" | "⇞" | "⎗" => OsCode::KEY_PAGEUP,
+        "PageDown" | "pgdn" | "⇟" | "⎘" => OsCode::KEY_PAGEDOWN,
+        "ArrowUp" | "up" | "▲" | "↑" => OsCode::KEY_UP,
+        "ArrowDown" | "down" | "▼" | "↓" => OsCode::KEY_DOWN,
+        "ArrowLeft" | "lft" | "left" | "◀" | "←" => OsCode::KEY_LEFT,
+        "ArrowRight" | "rght" | "▶" | "→" => OsCode::KEY_RIGHT,
+        "Home" | "home" | "⇤" | "⤒" | "↖" | "⇱" => OsCode::KEY_HOME,
+        "End" | "end" | "⇥" | "⤓" | "↘" | "⇲" => OsCode::KEY_END,
         "NumLock" | "nlck" | "nlk" | "⇭"=> OsCode::KEY_NUMLOCK,
         "VolumeMute" | "mute"  | "🔇" | "🔈⓪" | "🔈⓿" | "🔈₀" => OsCode::KEY_MUTE,
         "VolumeUp" | "volu" | "🔊" | "🔈+" | "🔈➕" | "🔈₊" | "🔈⊕" => OsCode::KEY_VOLUMEUP,
@@ -324,11 +324,15 @@ pub fn str_to_oscode(s: &str) -> Option<OsCode> {
         "cnv" | "conv" | "henk" | "hnk" | "henkan" => OsCode::KEY_HENKAN,
         "ncnv" | "mhnk" | "muhenkan" => OsCode::KEY_MUHENKAN,
         "IntlRo" | "ro" => OsCode::KEY_RO,
+        #[cfg(target_os = "macos")]
+        "Lang1" | "kana" => OsCode::KEY_HANGEUL,
+        #[cfg(any(target_os = "macos", target_os = "unknown"))]
+        "Lang2" | "eisu" => OsCode::KEY_HANJA,
 
         #[cfg(any(target_os = "linux", target_os = "unknown"))]
-        "PrintScreen" | "prtsc" | "prnt" => OsCode::KEY_SYSRQ,
+        "PrintScreen" | "prtsc" | "prnt" | "⎙" => OsCode::KEY_SYSRQ,
         #[cfg(target_os = "windows")]
-        "PrintScreen" | "prtsc" | "prnt" => OsCode::KEY_PRINT,
+        "PrintScreen" | "prtsc" | "prnt" | "⎙" => OsCode::KEY_PRINT,
 
         // NOTE: these are linux and interception-only due to missing implementation for LLHOOK.
         "mlft" | "mouseleft" | "🖰1" | "‹🖰" => OsCode::BTN_LEFT,
@@ -355,6 +359,12 @@ pub fn str_to_oscode(s: &str) -> Option<OsCode> {
         #[cfg(any(target_os = "linux", target_os = "unknown"))]
         "zzz" | "sleep" => OsCode::KEY_SLEEP,
 
+        "sls" | "SpotLightSearch" => OsCode::KEY_249,
+        "dtn" | "Dictation" => OsCode::KEY_250,
+        "dnd" | "DoNotDisturb" => OsCode::KEY_251,
+        "mctl" | "MissionControl" => OsCode::KEY_252,
+        "lpad" | "LaunchPad" => OsCode::KEY_253,
+
         // Keys that behave as no-ops but can be used in sequences.
         // Also see: POTENTIAL PROBLEM - G-keys
         "nop0" => OsCode::KEY_676,
@@ -367,6 +377,10 @@ pub fn str_to_oscode(s: &str) -> Option<OsCode> {
         "nop7" => OsCode::KEY_683,
         "nop8" => OsCode::KEY_684,
         "nop9" => OsCode::KEY_685,
+
+        // has no output mapping. only intended to be used in the input
+        // position, in conjunction with `mouse-movement-key mvmt`
+        "mvmt" | "mousemovement" | "🖰mv" => OsCode::KEY_766,
 
         _ => return None,
     })
@@ -1151,7 +1165,7 @@ pub enum OsCode {
     KEY_763 = 763,
     KEY_764 = 764,
     KEY_765 = 765,
-    KEY_766 = 766,
+    KEY_766 = 766, // aliased to mvmt as a dummy input for use with mouse-movement-key
 
     KEY_MAX = 767,
 }
@@ -1161,9 +1175,9 @@ impl fmt::Display for OsCode {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let self_dbg = format!("{self:?}");
         if let Some(key) = self_dbg.strip_prefix("KEY_") {
-            write!(f, "{}", key)
+            write!(f, "{key}")
         } else {
-            write!(f, "{:?}", self)
+            write!(f, "{self:?}")
         }
     }
 }

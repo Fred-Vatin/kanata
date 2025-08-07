@@ -55,6 +55,8 @@ pub const ON_PRESS_FAKEKEY: &str = "on-press-fakekey";
 pub const ON_PRESS_FAKEKEY_A: &str = "on↓fakekey";
 pub const ON_RELEASE_FAKEKEY: &str = "on-release-fakekey";
 pub const ON_RELEASE_FAKEKEY_A: &str = "on↑fakekey";
+pub const ON_PRESS_DELAY: &str = "on-press-delay";
+pub const ON_RELEASE_DELAY: &str = "on-release-delay";
 pub const ON_PRESS_FAKEKEY_DELAY: &str = "on-press-fakekey-delay";
 pub const ON_PRESS_FAKEKEY_DELAY_A: &str = "on↓fakekey-delay";
 pub const ON_RELEASE_FAKEKEY_DELAY: &str = "on-release-fakekey-delay";
@@ -107,6 +109,7 @@ pub const CAPS_WORD_CUSTOM_TOGGLE_A: &str = "word⇪custom-toggle";
 pub const DYNAMIC_MACRO_RECORD_STOP_TRUNCATE: &str = "dynamic-macro-record-stop-truncate";
 pub const SWITCH: &str = "switch";
 pub const SEQUENCE: &str = "sequence";
+pub const SEQUENCE_NOERASE: &str = "sequence-noerase";
 pub const UNMOD: &str = "unmod";
 pub const UNSHIFT: &str = "unshift";
 pub const UNSHIFT_A: &str = "un⇧";
@@ -117,6 +120,7 @@ pub const ON_PRESS_A: &str = "on↓";
 pub const ON_RELEASE: &str = "on-release";
 pub const ON_RELEASE_A: &str = "on↑";
 pub const ON_IDLE: &str = "on-idle";
+pub const ON_PHYSICAL_IDLE: &str = "on-physical-idle";
 pub const HOLD_FOR_DURATION: &str = "hold-for-duration";
 pub const CLIPBOARD_SET: &str = "clipboard-set";
 pub const CLIPBOARD_CMD_SET: &str = "clipboard-cmd-set";
@@ -174,6 +178,8 @@ pub fn is_list_action(ac: &str) -> bool {
         ON_PRESS_FAKEKEY_A,
         ON_RELEASE_FAKEKEY,
         ON_RELEASE_FAKEKEY_A,
+        ON_PRESS_DELAY,
+        ON_RELEASE_DELAY,
         ON_PRESS_FAKEKEY_DELAY,
         ON_PRESS_FAKEKEY_DELAY_A,
         ON_RELEASE_FAKEKEY_DELAY,
@@ -226,6 +232,7 @@ pub fn is_list_action(ac: &str) -> bool {
         DYNAMIC_MACRO_RECORD_STOP_TRUNCATE,
         SWITCH,
         SEQUENCE,
+        SEQUENCE_NOERASE,
         UNMOD,
         UNSHIFT,
         UNSHIFT_A,
@@ -236,6 +243,7 @@ pub fn is_list_action(ac: &str) -> bool {
         ON_RELEASE,
         ON_RELEASE_A,
         ON_IDLE,
+        ON_PHYSICAL_IDLE,
         HOLD_FOR_DURATION,
         MACRO_CANCEL_ON_NEXT_PRESS,
         MACRO_REPEAT_CANCEL_ON_NEXT_PRESS,
